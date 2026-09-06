@@ -17,7 +17,8 @@ public class CorsConfig implements WebMvcConfigurer {
                     "http://localhost:5174",
                     "http://posbarlacteo-manuel-2026.s3-website-us-east-1.amazonaws.com", // Producción AWS
                     "http://localhost:5173",                                             // PC Local
-                    "http://192.168.100.85:5173"   
+                    "http://192.168.100.85:5173",
+                    "https://kipi-web-frontend-eta.vercel.app/"   
                 ) 
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH") 
                 .allowCredentials(true); 
