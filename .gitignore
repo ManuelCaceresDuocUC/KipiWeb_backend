@@ -1,0 +1,34 @@
+HELP.md
+
+# Carpetas de compilación (Evita subir los 1.3 GB)
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# Archivos de entorno y propiedades locales
+.env
+*.log
+
+# IDEs y Editores
+.idea
+*.iws
+*.iml
+*.ipr
+.classpath
+.project
+.settings
+.factorypath
+.springBeans
+.sts4-cache
+.vscode/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/

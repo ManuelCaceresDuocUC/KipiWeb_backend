@@ -1,0 +1,59 @@
+name: Deploy Backend to EC2 with Docker Hub
+
+on:
+  push:
+    branches:
+      - main # Cambia a master si tu rama principal se llama así
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar Código
+        uses: actions/checkout@v4
+
+      - name: Iniciar sesión en Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Construir y Subir Imagen Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: . # <--- Cambiado a un solo punto (significa la raíz del repositorio)
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/mi-backend:latest
+
+      - name: Desplegar en EC2 de AWS Academy (Vía Proxy Frontend)
+        uses: appleboy/ssh-action@master
+        with:
+          # 1. DATOS DEL BACKEND (Subred Privada)
+          host: ${{ secrets.EC2_BACKEND_HOST }}      # Aquí pones la IP PRIVADA del backend (ej. 10.0.x.x)
+          username: ${{ secrets.EC2_BACKEND_USER }}
+          key: ${{ secrets.EC2_BACKEND_KEY }}        # Tu llave privada .pem o .ppk
+          
+          # 2. DATOS DEL FRONTEND (Subred Pública - Actúa como puente)
+          proxy_host: ${{ secrets.EC2_FRONTEND_HOST }}  # Aquí pones la IP PÚBLICA del frontend
+          proxy_username: ${{ secrets.EC2_FRONTEND_USER }}
+          proxy_key: ${{ secrets.EC2_FRONTEND_KEY }}    # Normalmente es la misma llave, pero usa su propio secreto
+          
+          script: |
+            # Descargar la nueva versión desde Docker Hub
+            docker pull ${{ secrets.DOCKER_USERNAME }}/mi-backend:latest
+            
+            # Detener contenedores anteriores
+            docker stop backend-app || true
+            docker rm backend-app || true
+            
+            # Encender el contenedor con reinicio automático y variables correctas
+            docker run -d -p 3000:8080 --name backend-app \
+              --restart unless-stopped \
+              -e SPRING_DATASOURCE_URL="jdbc:mysql://mi-base-datos-lab.cv1y27electk.us-east-1.rds.amazonaws.com:3306/posbarlacteo?useSSL=false&serverTimezone=UTC" \
+              -e SPRING_DATASOURCE_USERNAME="admin" \
+              -e SPRING_DATASOURCE_PASSWORD="Password123!" \
+              ${{ secrets.DOCKER_USERNAME }}/mi-backend:latest
+            
+            # Dar tiempo al backend para arrancar y revisar la conexión
+            sleep 15
+            docker logs backend-app

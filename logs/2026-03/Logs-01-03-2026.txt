@@ -1,0 +1,9 @@
+--- 01-03-2026 00:19:44 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":5450,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-03-01T00:19:44.898489200\"}","Sign":"D5586C261734E83289BE708A3E6EE9595506AD276D2A43249A6D07D7EFFCAA6C"}
+---------------------------
+--- 01-03-2026 00:19:45 ---
+RESPONSE: {"Received":true}
+---------------------------
+--- 01-03-2026 00:19:56 ---
+REQUEST: {"JsonSerialized":"{\"FunctionCode\":100,\"ResponseCode\":0,\"ResponseMessage\":\"Aprobado\",\"CommerceCode\":550062700310,\"TerminalId\":\"ABC1234C\",\"Ticket\":\"0001\",\"AuthorizationCode\":\"XZ123456\",\"Amount\":5450,\"SharesNumber\":3,\"SharesAmount\":5000,\"Last4Digits\":\"677\",\"OperationId\":60,\"CardType\":\"CR\",\"AccountingDate\":\"2023-12-28 22:35:12\",\"AccountNumber\":\"30000000000\",\"CardBrand\":\"AX\",\"RealDate\":\"2023-12-28 22:35:12\",\"EmployeeId\":1,\"Tip\":1500,\"SaleType\":1,\"PosMode\":1,\"Cashback\":0,\"TransToken\":\"8000001231060620240923213405\",\"ExpiryDate\":\"0828\",\"EntryMode\":\"23\",\"AID\":\"315041592E5359532E4444463031\",\"CommerceRut\":\"12345678-9\",\"CommerceName\":\"Getnet SPA\",\"BranchName\":\"Work Café Agustinas\",\"BranchAddress\":\"Agustinas 920\",\"BranchDistrict\":\"Santiago\",\"Bin\":\"12345678\"}","Sign":"CB5DBE6EC7A2D1A31940F34BDFA85A38CEA60B322EE08C2EFCC306655F8387FC"}
+---------------------------

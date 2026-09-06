@@ -1,0 +1,114 @@
+--- 28-02-2026 14:59:53 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":5000,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T14:59:53.906252500\"}","Sign":"651F38FFCFBC5254AD4B88EA6B1B5D9739AA5DFC1F70FE6405AD4D6C1EECC0EA"}
+---------------------------
+--- 28-02-2026 16:48:25 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":5000,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T16:48:25.370409800\"}","Sign":"B384599CD520F079A2AFC34CE7869A08F42BB853F4B399AC5A8DE19796E4F8CB"}
+---------------------------
+--- 28-02-2026 18:45:47 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T18:45:47.466936500\"}","Sign":"AF874E8E458995DDCA5BC938CE7D52BF7FD302922B0E27995AC4F8C99718211A"}
+---------------------------
+--- 28-02-2026 18:56:10 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":5000,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T18:56:10.667836500\"}","Sign":"DABCE13CA8A2BDC2BFF17F7A188CCBAF62EE4B327FD0876CB149DDF90775CB3C"}
+---------------------------
+--- 28-02-2026 19:06:10 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":5000,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:06:10.424196200\"}","Sign":"2960FA6CBC0AA45F3E8C885AA3DCE3AF46EF46DD9CD4FEC99A3C9742EF3535DB"}
+---------------------------
+--- 28-02-2026 19:07:45 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":5000,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:07:45.688206600\"}","Sign":"A6A239A2C6B30F4FD9A4F104717A291E577F613C0D3EF8E21B93628720861EDB"}
+---------------------------
+--- 28-02-2026 19:08:18 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:08:18.360645\"}","Sign":"32B9DA6C6094AD5D58B67202E166A97675E7C86F781EF28D8C9A91F69A45ABBE"}
+---------------------------
+--- 28-02-2026 19:09:49 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:09:49.926358\"}","Sign":"636CC85E2875324D5DD7542AC2E9FEDF353DBB72135D038E544F226B9DBDCE09"}
+---------------------------
+--- 28-02-2026 19:09:50 ---
+RESPONSE: {"Received":true}
+---------------------------
+--- 28-02-2026 19:09:55 ---
+REQUEST: {"JsonSerialized":"{\"FunctionCode\":100,\"ResponseCode\":0,\"ResponseMessage\":\"Aprobado\",\"CommerceCode\":550062700310,\"TerminalId\":\"ABC1234C\",\"Ticket\":\"0001\",\"AuthorizationCode\":\"XZ123456\",\"Amount\":2500,\"SharesNumber\":3,\"SharesAmount\":5000,\"Last4Digits\":\"677\",\"OperationId\":60,\"CardType\":\"CR\",\"AccountingDate\":\"2023-12-28 22:35:12\",\"AccountNumber\":\"30000000000\",\"CardBrand\":\"AX\",\"RealDate\":\"2023-12-28 22:35:12\",\"EmployeeId\":1,\"Tip\":1500,\"SaleType\":1,\"PosMode\":1,\"Cashback\":0,\"TransToken\":\"8000001231060620240923213405\",\"ExpiryDate\":\"0828\",\"EntryMode\":\"23\",\"AID\":\"315041592E5359532E4444463031\",\"CommerceRut\":\"12345678-9\",\"CommerceName\":\"Getnet SPA\",\"BranchName\":\"Work Café Agustinas\",\"BranchAddress\":\"Agustinas 920\",\"BranchDistrict\":\"Santiago\",\"Bin\":\"12345678\"}","Sign":"6289B6E43A77D6E63ABA2F9283DE7A24911C9399B966F255B6417C8EF26F81F3"}
+---------------------------
+--- 28-02-2026 19:09:55 ---
+ERROR: The POS does not respond that it received the command.
+---------------------------
+--- 28-02-2026 19:14:02 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:14:02.175065300\"}","Sign":"222E22195770B4FCB45A4DE08426E302CCCA0007109C1D12FFADD1EF27E2903A"}
+---------------------------
+--- 28-02-2026 19:14:13 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:14:13.129673600\"}","Sign":"E3F3C4A195F6CB9779BC59298775480A2F13BF740C82B41EA31B75EA4CB41773"}
+---------------------------
+--- 28-02-2026 19:16:01 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:16:01.283397300\"}","Sign":"D53698921A62BBE1CD0C38E194398F5015447825834AC29AF86E48FA391BED0B"}
+---------------------------
+--- 28-02-2026 19:16:23 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:16:23.813961900\"}","Sign":"864896889CC4F31232CEF990D22D5C4C634E9E90046DD3FC5B74300F948F1F3E"}
+---------------------------
+--- 28-02-2026 19:17:39 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:17:39.890193200\"}","Sign":"8D9D3E9E39ABBBEC51CEF9E5F7CF908FB74C44A56BC1CD02394A27AFD1C9B50F"}
+---------------------------
+--- 28-02-2026 19:19:21 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:19:21.791380900\"}","Sign":"6E7AB346DD1FB122890A047E1DFC8BBA23BB96EED84AE660D9A042CDC1DEAB56"}
+---------------------------
+--- 28-02-2026 19:21:09 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:21:09.435041800\"}","Sign":"F25FDFCA2DAC919E1191BF6FD04F596BFE70C59687804FBB766BA7510EA0E76B"}
+---------------------------
+--- 28-02-2026 19:22:44 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:22:44.839101300\"}","Sign":"BE84540270482D69CEFFA313F8E755E6253D3343DC25A61C7FE02C07D39E8C4A"}
+---------------------------
+--- 28-02-2026 19:25:36 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:25:36.592129100\"}","Sign":"BC1CF59B8882F4E726E2E3D7E59365B4949A2918EC9AA94DF29AB7C3E92FFFC2"}
+---------------------------
+--- 28-02-2026 19:26:04 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:26:04.151077\"}","Sign":"A1510FD07D9AC8BEC85F12E2D387E435478AA510DDF44900B0698B6FAD7615B7"}
+---------------------------
+--- 28-02-2026 19:27:47 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:27:47.865317400\"}","Sign":"BB965E5753310E30A490BD78CAF8BE07429B37867092C737540A469247779D0C"}
+---------------------------
+--- 28-02-2026 19:29:11 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:29:11.456692100\"}","Sign":"72A203B76341EBDA5B6C62F86D63EE3ADF9F8BAD80AD43B21EA2227780AF58F8"}
+---------------------------
+--- 28-02-2026 19:31:46 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:31:46.842088900\"}","Sign":"979DDB16C7199DE0B302A631D29A4F681981E51595B65D5D2169F47E627E03DB"}
+---------------------------
+--- 28-02-2026 19:32:09 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:32:09.806483800\"}","Sign":"524381EF0152A60B77AC86F9E879EB31A86CAF84039BE3C83756320C95189520"}
+---------------------------
+--- 28-02-2026 19:32:45 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:32:45.202295100\"}","Sign":"C5582CBF38B1B77EC72471BAFADAAC77A2EA6D853E23A73036DA0B1E1F35E842"}
+---------------------------
+--- 28-02-2026 19:39:30 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:39:29.992206\"}","Sign":"477FFBB8C5BF475D5C97B8217E6BD9F908D4F75498E5A22DD5305F6BBEC5779B"}
+---------------------------
+--- 28-02-2026 19:39:30 ---
+RESPONSE: {"Received":true}
+---------------------------
+--- 28-02-2026 19:39:34 ---
+REQUEST: {"JsonSerialized":"{\"FunctionCode\":100,\"ResponseCode\":0,\"ResponseMessage\":\"Aprobado\",\"CommerceCode\":550062700310,\"TerminalId\":\"ABC1234C\",\"Ticket\":\"0001\",\"AuthorizationCode\":\"XZ123456\",\"Amount\":2500,\"SharesNumber\":3,\"SharesAmount\":5000,\"Last4Digits\":\"677\",\"OperationId\":60,\"CardType\":\"CR\",\"AccountingDate\":\"2023-12-28 22:35:12\",\"AccountNumber\":\"30000000000\",\"CardBrand\":\"AX\",\"RealDate\":\"2023-12-28 22:35:12\",\"EmployeeId\":1,\"Tip\":1500,\"SaleType\":1,\"PosMode\":1,\"Cashback\":0,\"TransToken\":\"8000001231060620240923213405\",\"ExpiryDate\":\"0828\",\"EntryMode\":\"23\",\"AID\":\"315041592E5359532E4444463031\",\"CommerceRut\":\"12345678-9\",\"CommerceName\":\"Getnet SPA\",\"BranchName\":\"Work Café Agustinas\",\"BranchAddress\":\"Agustinas 920\",\"BranchDistrict\":\"Santiago\",\"Bin\":\"12345678\"}","Sign":"6289B6E43A77D6E63ABA2F9283DE7A24911C9399B966F255B6417C8EF26F81F3"}
+---------------------------
+--- 28-02-2026 19:42:09 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:42:09.196890500\"}","Sign":"5BD94E0F99CA6654EA46CA497916723BD2A3356F9683B13B37A0DDDD3A8C5CF9"}
+---------------------------
+--- 28-02-2026 19:42:09 ---
+RESPONSE: {"Received":true}
+---------------------------
+--- 28-02-2026 19:42:12 ---
+REQUEST: {"JsonSerialized":"{\"FunctionCode\":100,\"ResponseCode\":0,\"ResponseMessage\":\"Aprobado\",\"CommerceCode\":550062700310,\"TerminalId\":\"ABC1234C\",\"Ticket\":\"0001\",\"AuthorizationCode\":\"XZ123456\",\"Amount\":2500,\"SharesNumber\":3,\"SharesAmount\":5000,\"Last4Digits\":\"677\",\"OperationId\":60,\"CardType\":\"CR\",\"AccountingDate\":\"2023-12-28 22:35:12\",\"AccountNumber\":\"30000000000\",\"CardBrand\":\"AX\",\"RealDate\":\"2023-12-28 22:35:12\",\"EmployeeId\":1,\"Tip\":1500,\"SaleType\":1,\"PosMode\":1,\"Cashback\":0,\"TransToken\":\"8000001231060620240923213405\",\"ExpiryDate\":\"0828\",\"EntryMode\":\"23\",\"AID\":\"315041592E5359532E4444463031\",\"CommerceRut\":\"12345678-9\",\"CommerceName\":\"Getnet SPA\",\"BranchName\":\"Work Café Agustinas\",\"BranchAddress\":\"Agustinas 920\",\"BranchDistrict\":\"Santiago\",\"Bin\":\"12345678\"}","Sign":"6289B6E43A77D6E63ABA2F9283DE7A24911C9399B966F255B6417C8EF26F81F3"}
+---------------------------
+--- 28-02-2026 19:44:13 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:44:13.672411200\"}","Sign":"1B93C7CB09BE0D8CCA3B3DB2D5D6AF0F2F6300F52C8100234B23110C4247B7BD"}
+---------------------------
+--- 28-02-2026 19:44:13 ---
+RESPONSE: {"Received":true}
+---------------------------
+--- 28-02-2026 19:44:18 ---
+REQUEST: {"JsonSerialized":"{\"FunctionCode\":100,\"ResponseCode\":0,\"ResponseMessage\":\"Aprobado\",\"CommerceCode\":550062700310,\"TerminalId\":\"ABC1234C\",\"Ticket\":\"0001\",\"AuthorizationCode\":\"XZ123456\",\"Amount\":2500,\"SharesNumber\":3,\"SharesAmount\":5000,\"Last4Digits\":\"677\",\"OperationId\":60,\"CardType\":\"CR\",\"AccountingDate\":\"2023-12-28 22:35:12\",\"AccountNumber\":\"30000000000\",\"CardBrand\":\"AX\",\"RealDate\":\"2023-12-28 22:35:12\",\"EmployeeId\":1,\"Tip\":1500,\"SaleType\":1,\"PosMode\":1,\"Cashback\":0,\"TransToken\":\"8000001231060620240923213405\",\"ExpiryDate\":\"0828\",\"EntryMode\":\"23\",\"AID\":\"315041592E5359532E4444463031\",\"CommerceRut\":\"12345678-9\",\"CommerceName\":\"Getnet SPA\",\"BranchName\":\"Work Café Agustinas\",\"BranchAddress\":\"Agustinas 920\",\"BranchDistrict\":\"Santiago\",\"Bin\":\"12345678\"}","Sign":"6289B6E43A77D6E63ABA2F9283DE7A24911C9399B966F255B6417C8EF26F81F3"}
+---------------------------
+--- 28-02-2026 19:46:42 ---
+REQUEST: {"JsonSerialized":"{\"Command\":100,\"Amount\":2500,\"TicketNumber\":\"0001\",\"PrintOnPos\":true,\"SaleType\":0,\"SendMessage\":false,\"EmployeeId\":1,\"DateTime\":\"2026-02-28T19:46:42.007539300\"}","Sign":"14FE109C7BCE1FF0F5C20864D5BFE569954AEC84258915EC521D8806AAB6FD85"}
+---------------------------
+--- 28-02-2026 19:46:42 ---
+RESPONSE: {"Received":true}
+---------------------------
+--- 28-02-2026 19:46:48 ---
+REQUEST: {"JsonSerialized":"{\"FunctionCode\":100,\"ResponseCode\":0,\"ResponseMessage\":\"Aprobado\",\"CommerceCode\":550062700310,\"TerminalId\":\"ABC1234C\",\"Ticket\":\"0001\",\"AuthorizationCode\":\"XZ123456\",\"Amount\":2500,\"SharesNumber\":3,\"SharesAmount\":5000,\"Last4Digits\":\"677\",\"OperationId\":60,\"CardType\":\"CR\",\"AccountingDate\":\"2023-12-28 22:35:12\",\"AccountNumber\":\"30000000000\",\"CardBrand\":\"AX\",\"RealDate\":\"2023-12-28 22:35:12\",\"EmployeeId\":1,\"Tip\":1500,\"SaleType\":1,\"PosMode\":1,\"Cashback\":0,\"TransToken\":\"8000001231060620240923213405\",\"ExpiryDate\":\"0828\",\"EntryMode\":\"23\",\"AID\":\"315041592E5359532E4444463031\",\"CommerceRut\":\"12345678-9\",\"CommerceName\":\"Getnet SPA\",\"BranchName\":\"Work Café Agustinas\",\"BranchAddress\":\"Agustinas 920\",\"BranchDistrict\":\"Santiago\",\"Bin\":\"12345678\"}","Sign":"6289B6E43A77D6E63ABA2F9283DE7A24911C9399B966F255B6417C8EF26F81F3"}
+---------------------------
