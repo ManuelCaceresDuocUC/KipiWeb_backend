@@ -45,7 +45,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RegistroController {
 
-    // Se inyectan los repositorios automáticamente mediante @RequiredArgsConstructor
     private final EmpresaRepository empresaRepository;
     private final UsuarioRepository usuarioRepository;
 
@@ -54,6 +53,14 @@ public class RegistroController {
 
     @Value("${flow.secret.key}")
     private String flowSecretKey;
+
+    // Inyectamos las URLs desde el application.properties
+    // Se añade un valor por defecto después de los dos puntos (:) por si olvidas configurarlo
+    @Value("${app.frontend.url:https://www.kipipos.cl}")
+    private String frontendUrl;
+
+    @Value("${app.backend.url:http://localhost:8080}")
+    private String backendUrl;
 
     private final String FLOW_BASE_URL = "https://sandbox.flow.cl/api"; 
     private final String PLAN_ID = "KIPI";
@@ -65,11 +72,11 @@ public class RegistroController {
         data.getAdmin().getCorreo(), 
         data.getEmpresa().getRazon_social(), 
         data.getEmpresa().getRut_empresa());
+        
         try {
             // 1. Crear cliente en Flow
             String customerId = crearClienteFlow(data.getAdmin().getCorreo(), data.getEmpresa().getRazon_social(), data.getEmpresa().getRut_empresa());
 
-            // 2. Guardar empresa en estado PENDIENTE
             // 2. Guardar empresa en estado PENDIENTE / INACTIVA
             Empresa nuevaEmpresa = new Empresa();
             nuevaEmpresa.setRazonSocial(data.getEmpresa().getRazon_social());
@@ -98,7 +105,6 @@ public class RegistroController {
                     Usuario nuevoEmpleado = new Usuario();
                     nuevoEmpleado.setUsuario(empData.getUsuario());
                     nuevoEmpleado.setContrasena(empData.getContrasena());
-                    // El correo puede ser nulo para cajeros, o puedes generar uno ficticio si tu BD lo exige
                     nuevoEmpleado.setCorreo(empData.getUsuario() + "@" + data.getEmpresa().getRut_empresa() + ".local"); 
                     nuevoEmpleado.setRol(empData.getRol() != null ? empData.getRol() : "vendedor");
                     nuevoEmpleado.setEmpresa(nuevaEmpresa);
@@ -106,8 +112,8 @@ public class RegistroController {
                 }
             }
 
-            // 4. Generar URL de pago
-            String urlReturn = "http://localhost:8080/api/auth/registro-exitoso";
+            // 4. Generar URL de pago usando la URL dinámica del Backend
+            String urlReturn = backendUrl + "/api/auth/registro-exitoso";
             String urlRegistroTarjeta = generarEnlaceRegistroTarjeta(customerId, urlReturn);
 
             Map<String, String> response = new HashMap<>();
@@ -154,24 +160,28 @@ public class RegistroController {
                     
                     log.info("Empresa activada (Trial/Activa). Suscripción ID: {}", suscripcion.get("subscriptionId"));
                     
+                    // Redirigir al Frontend Dinámico (Éxito)
                     return ResponseEntity.status(HttpStatus.FOUND)
-                            .location(URI.create("http://localhost:5173/registro-exitoso?status=success"))
+                            .location(URI.create(frontendUrl + "/registro-exitoso?status=success"))
                             .build();
                 } else {
                     log.warn("Suscripción rechazada o fallida. Estado devuelto: {}", statusStr);
+                    // Redirigir al Frontend Dinámico (Fallo de pago)
                     return ResponseEntity.status(HttpStatus.FOUND)
-                            .location(URI.create("http://localhost:5173/registro-exitoso?status=payment_failed"))
+                            .location(URI.create(frontendUrl + "/registro-exitoso?status=payment_failed"))
                             .build();
                 }
             } else {
+                // Redirigir al Frontend Dinámico (Error en tarjeta)
                 return ResponseEntity.status(HttpStatus.FOUND)
-                        .location(URI.create("http://localhost:5173/registro-exitoso?status=error"))
+                        .location(URI.create(frontendUrl + "/registro-exitoso?status=error"))
                         .build();
             }
         } catch (Exception e) {
             log.error("Error validando el retorno de Flow: ", e);
+            // Redirigir al Frontend Dinámico (Excepción)
             return ResponseEntity.status(HttpStatus.FOUND)
-                    .location(URI.create("http://localhost:5173/registro-exitoso?status=error"))
+                    .location(URI.create(frontendUrl + "/registro-exitoso?status=error"))
                     .build();
         }
     }
@@ -300,13 +310,14 @@ public class RegistroController {
             throw new RuntimeException("Rechazo de Flow (" + e.getStatusCode() + "): " + errorRealFlow);
         }
     }
+
     private Map<String, Object> consultarEstadoSuscripcion(String subscriptionId) throws Exception {
         String cleanApiKey = flowApiKey.trim();
         String cleanSecretKey = flowSecretKey.trim();
 
         Map<String, String> params = new TreeMap<>();
         params.put("apiKey", cleanApiKey);
-        params.put("subscriptionId", subscriptionId); // ID que guardaste al crear la suscripción
+        params.put("subscriptionId", subscriptionId); 
 
         StringBuilder dataToSign = new StringBuilder();
         for (Map.Entry<String, String> entry : params.entrySet()) {
@@ -326,7 +337,6 @@ public class RegistroController {
         }
         params.put("s", hexString.toString());
 
-        // Flow requiere GET para las consultas de estado
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(FLOW_BASE_URL + "/subscription/get");
         params.forEach(builder::queryParam);
 
