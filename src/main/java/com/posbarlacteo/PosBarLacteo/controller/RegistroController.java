@@ -68,6 +68,14 @@ public class RegistroController {
     @PostMapping("/registrar-empresa")
     @Transactional(rollbackFor = Exception.class) 
     public ResponseEntity<?> registrarEmpresaCompleta(@RequestBody RegistroEmpresaDTO data) {
+        log.info("--- DEBUG FLOW KEYS ---");
+    log.info("API Key leída: [{}]", flowApiKey);
+    if(flowSecretKey != null && flowSecretKey.length() > 4) {
+        log.info("Secret Key leída empieza con: [{}]", flowSecretKey.substring(0, 4) + "...");
+    } else {
+        log.info("Secret Key está VACÍA o es nula");
+    }
+    log.info("-----------------------");
         log.info("Datos recibidos: Correo={}, RazonSocial={}, Rut={}", 
         data.getAdmin().getCorreo(), 
         data.getEmpresa().getRazon_social(), 
