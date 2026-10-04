@@ -17,6 +17,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -47,6 +48,7 @@ public class RegistroController {
 
     private final EmpresaRepository empresaRepository;
     private final UsuarioRepository usuarioRepository;
+    private final PasswordEncoder passwordEncoder;
 
     @Value("${flow.api.key}")
     private String flowApiKey;
@@ -60,65 +62,67 @@ public class RegistroController {
     @Value("${app.backend.url:http://localhost:8080}")
     private String backendUrl;
 
-    private final String FLOW_BASE_URL = "https://sandbox.flow.cl/api"; 
-    private final String PLAN_ID = "KIPI";
+    private static final String FLOW_BASE_URL = "https://sandbox.flow.cl/api";
+    private static final String PLAN_ID = "KIPI";
 
+    private static final ParameterizedTypeReference<Map<String, Object>> MAP_TYPE =
+            new ParameterizedTypeReference<>() {};
+
+    private final RestTemplate restTemplate = new RestTemplate();
+
+    // ------------------------------------------------------------------
+    // REGISTRO
+    // ------------------------------------------------------------------
     @PostMapping("/registrar-empresa")
-    @Transactional(rollbackFor = Exception.class) 
+    @Transactional(rollbackFor = Exception.class)
     public ResponseEntity<?> registrarEmpresaCompleta(@RequestBody RegistroEmpresaDTO data) {
-        log.info("--- DEBUG FLOW KEYS ---");
-        log.info("API Key leída: [{}]", flowApiKey);
-        if(flowSecretKey != null && flowSecretKey.length() > 4) {
-            log.info("Secret Key leída empieza con: [{}]", flowSecretKey.substring(0, 4) + "...");
-        } else {
-            log.info("Secret Key está VACÍA o es nula");
-        }
-        log.info("-----------------------");
-        log.info("Datos recibidos: Correo={}, RazonSocial={}, Rut={}", 
-            data.getAdmin().getCorreo(), 
-            data.getEmpresa().getRazon_social(), 
-            data.getEmpresa().getRut_empresa());
-        
+        log.info("Registro recibido: correo={}, razonSocial={}, rut={}",
+                data.getAdmin().getCorreo(),
+                data.getEmpresa().getRazon_social(),
+                data.getEmpresa().getRut_empresa());
+
         try {
             // 1. Crear cliente en Flow
-            String customerId = crearClienteFlow(data.getAdmin().getCorreo(), data.getEmpresa().getRazon_social(), data.getEmpresa().getRut_empresa());
+            String customerId = crearClienteFlow(
+                    data.getAdmin().getCorreo(),
+                    data.getEmpresa().getRazon_social(),
+                    data.getEmpresa().getRut_empresa());
 
-            // 2. Guardar empresa en estado PENDIENTE / INACTIVA
+            // 2. Guardar empresa PENDIENTE / INACTIVA
             Empresa nuevaEmpresa = new Empresa();
             nuevaEmpresa.setRazonSocial(data.getEmpresa().getRazon_social());
             nuevaEmpresa.setRutEmpresa(data.getEmpresa().getRut_empresa());
             nuevaEmpresa.setGiro(data.getEmpresa().getGiro());
             nuevaEmpresa.setDireccion(data.getEmpresa().getDireccion());
             nuevaEmpresa.setComuna(data.getEmpresa().getComuna());
-            
-            nuevaEmpresa.setFlowCustomerId(customerId); 
-            nuevaEmpresa.setEstado("PENDIENTE"); 
+            nuevaEmpresa.setFlowCustomerId(customerId);
+            nuevaEmpresa.setEstado("PENDIENTE");
             nuevaEmpresa.setActivo(false);
             empresaRepository.save(nuevaEmpresa);
 
-            // 3. Guardar el usuario administrador
+            // 3. Usuario administrador
             Usuario nuevoAdmin = new Usuario();
             nuevoAdmin.setUsuario(data.getAdmin().getUsuario());
-            nuevoAdmin.setContrasena(data.getAdmin().getContrasena());
-            nuevoAdmin.setCorreo(data.getAdmin().getCorreo()); 
-            nuevoAdmin.setRol(data.getAdmin().getRol() != null ? data.getAdmin().getRol() : "admin"); 
+            nuevoAdmin.setContrasena(passwordEncoder.encode(data.getAdmin().getContrasena()));
+            nuevoAdmin.setCorreo(data.getAdmin().getCorreo());
+            nuevoAdmin.setRol(data.getAdmin().getRol() != null ? data.getAdmin().getRol() : "admin");
             nuevoAdmin.setEmpresa(nuevaEmpresa);
             usuarioRepository.save(nuevoAdmin);
 
-            // 3.5 Guardar empleados adicionales (colaboradores)
+            // 3.5 Empleados adicionales
             if (data.getEmpleados() != null && !data.getEmpleados().isEmpty()) {
                 for (RegistroEmpresaDTO.UsuarioDTO empData : data.getEmpleados()) {
                     Usuario nuevoEmpleado = new Usuario();
                     nuevoEmpleado.setUsuario(empData.getUsuario());
-                    nuevoEmpleado.setContrasena(empData.getContrasena());
-                    nuevoEmpleado.setCorreo(empData.getUsuario() + "@" + data.getEmpresa().getRut_empresa() + ".local"); 
+                    nuevoEmpleado.setContrasena(passwordEncoder.encode(empData.getContrasena()));
+                    nuevoEmpleado.setCorreo(empData.getUsuario() + "@" + data.getEmpresa().getRut_empresa() + ".local");
                     nuevoEmpleado.setRol(empData.getRol() != null ? empData.getRol() : "vendedor");
                     nuevoEmpleado.setEmpresa(nuevaEmpresa);
                     usuarioRepository.save(nuevoEmpleado);
                 }
             }
 
-            // 4. Generar URL de pago usando la URL dinámica del Backend
+            // 4. URL de registro de tarjeta
             String urlReturn = backendUrl + "/api/auth/registro-exitoso";
             String urlRegistroTarjeta = generarEnlaceRegistroTarjeta(customerId, urlReturn);
 
@@ -132,237 +136,172 @@ public class RegistroController {
         }
     }
 
+    // ------------------------------------------------------------------
+    // RETORNO DESDE FLOW
+    // ------------------------------------------------------------------
     @RequestMapping(value = "/registro-exitoso", method = {RequestMethod.POST, RequestMethod.GET})
     @Transactional(rollbackFor = Exception.class)
     public ResponseEntity<?> retornoRegistroFlow(@RequestParam("token") String token) {
         try {
-            // 1. Consultar si se registró la tarjeta en Flow
             Map<String, Object> estadoRegistro = consultarEstadoRegistro(token);
             Object statusObj = estadoRegistro.get("status");
             boolean registroTarjetaExitoso = statusObj != null && "1".equals(String.valueOf(statusObj));
 
-            if (registroTarjetaExitoso) {
-                String customerId = (String) estadoRegistro.get("customerId");
-                
-                // 2. Suscribir al cliente y capturar el estado real
-                Map<String, Object> suscripcion = suscribirClienteAlPlan(customerId, PLAN_ID);
-                Object subStatusObj = suscripcion.get("status");
-                String statusStr = String.valueOf(subStatusObj);
-                
-                // 3. Validar: 1 = Activa, 2 = Trial
-                boolean suscripcionValida = "1".equals(statusStr) || "2".equals(statusStr);
-
-                if (suscripcionValida) {
-                    Empresa empresa = empresaRepository.findByFlowCustomerId(customerId)
-                        .orElseThrow(() -> new RuntimeException("Empresa no encontrada con el ID de Flow"));
-                    
-                    if (suscripcion.containsKey("subscriptionId")) {
-                        empresa.setFlowSubscriptionId((String) suscripcion.get("subscriptionId")); 
-                    }
-                    
-                    empresa.setEstado("ACTIVA");
-                    empresa.setActivo(true);
-                    empresaRepository.save(empresa);
-                    
-                    log.info("Empresa activada (Trial/Activa). Suscripción ID: {}", suscripcion.get("subscriptionId"));
-                    
-                    // Redirigir al Frontend Dinámico (Éxito)
-                    return ResponseEntity.status(HttpStatus.FOUND)
-                            .location(URI.create(frontendUrl + "/registro-exitoso?status=success"))
-                            .build();
-                } else {
-                    log.warn("Suscripción rechazada o fallida. Estado devuelto: {}", statusStr);
-                    // Redirigir al Frontend Dinámico (Fallo de pago)
-                    return ResponseEntity.status(HttpStatus.FOUND)
-                            .location(URI.create(frontendUrl + "/registro-exitoso?status=payment_failed"))
-                            .build();
-                }
-            } else {
-                // Redirigir al Frontend Dinámico (Error en tarjeta)
-                return ResponseEntity.status(HttpStatus.FOUND)
-                        .location(URI.create(frontendUrl + "/registro-exitoso?status=error"))
-                        .build();
+            if (!registroTarjetaExitoso) {
+                return redirigir("error");
             }
+
+            String customerId = (String) estadoRegistro.get("customerId");
+
+            Map<String, Object> suscripcion = suscribirClienteAlPlan(customerId, PLAN_ID);
+            String statusStr = String.valueOf(suscripcion.get("status"));
+
+            // 1 = Activa, 2 = Trial
+            boolean suscripcionValida = "1".equals(statusStr) || "2".equals(statusStr);
+
+            if (!suscripcionValida) {
+                log.warn("Suscripción rechazada o fallida. Estado: {}", statusStr);
+                return redirigir("payment_failed");
+            }
+
+            Empresa empresa = empresaRepository.findByFlowCustomerId(customerId)
+                    .orElseThrow(() -> new RuntimeException("Empresa no encontrada con el ID de Flow"));
+
+            if (suscripcion.containsKey("subscriptionId")) {
+                empresa.setFlowSubscriptionId(String.valueOf(suscripcion.get("subscriptionId")));
+            }
+            empresa.setEstado("ACTIVA");
+            empresa.setActivo(true);
+            empresaRepository.save(empresa);
+
+            log.info("Empresa activada. Suscripción ID: {}", suscripcion.get("subscriptionId"));
+            return redirigir("success");
+
         } catch (Exception e) {
             log.error("Error validando el retorno de Flow: ", e);
-            // Redirigir al Frontend Dinámico (Excepción)
-            return ResponseEntity.status(HttpStatus.FOUND)
-                    .location(URI.create(frontendUrl + "/registro-exitoso?status=error"))
-                    .build();
+            return redirigir("error");
         }
     }
 
-    private String crearClienteFlow(String email, String nombre, String rutId) throws Exception {
+    private ResponseEntity<?> redirigir(String status) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(frontendUrl + "/registro-exitoso?status=" + status))
+                .build();
+    }
+
+    // ------------------------------------------------------------------
+    // LLAMADAS A FLOW
+    // ------------------------------------------------------------------
+    private String crearClienteFlow(String email, String nombre, String rutId) {
         Map<String, String> params = new TreeMap<>();
-        params.put("apiKey", flowApiKey);
         params.put("name", nombre);
         params.put("email", email);
-        params.put("externalId", rutId); 
+        params.put("externalId", rutId);
 
-        Map<String, Object> responseMap = enviarPeticionFlow("/customer/create", params);
-        
-        if (responseMap.containsKey("customerId")) {
-            return (String) responseMap.get("customerId");
-        } else {
-            throw new RuntimeException("Error al crear cliente en Flow: " + responseMap);
+        Map<String, Object> responseMap = flowPost("/customer/create", params);
+
+        if (responseMap != null && responseMap.containsKey("customerId")) {
+            return String.valueOf(responseMap.get("customerId"));
         }
+        throw new RuntimeException("Error al crear cliente en Flow: " + responseMap);
     }
 
-    private String generarEnlaceRegistroTarjeta(String customerId, String urlReturn) throws Exception {
+    private String generarEnlaceRegistroTarjeta(String customerId, String urlReturn) {
         Map<String, String> params = new TreeMap<>();
-        params.put("apiKey", flowApiKey);
         params.put("customerId", customerId);
-        params.put("url_return", urlReturn); 
+        params.put("url_return", urlReturn);
 
-        Map<String, Object> responseMap = enviarPeticionFlow("/customer/register", params);
-        
-        if (responseMap.containsKey("url") && responseMap.containsKey("token")) {
+        Map<String, Object> responseMap = flowPost("/customer/register", params);
+
+        if (responseMap != null && responseMap.containsKey("url") && responseMap.containsKey("token")) {
             return responseMap.get("url") + "?token=" + responseMap.get("token");
-        } else {
-            throw new RuntimeException("Error al generar enlace de registro: " + responseMap);
         }
+        throw new RuntimeException("Error al generar enlace de registro: " + responseMap);
     }
 
-    private Map<String, Object> suscribirClienteAlPlan(String customerId, String planId) throws Exception {
+    private Map<String, Object> suscribirClienteAlPlan(String customerId, String planId) {
         Map<String, String> params = new TreeMap<>();
-        params.put("apiKey", flowApiKey);
         params.put("customerId", customerId);
         params.put("planId", planId);
-
-        return enviarPeticionFlow("/subscription/create", params);
+        return flowPost("/subscription/create", params);
     }
 
-    private Map<String, Object> consultarEstadoRegistro(String token) throws Exception {
-        String cleanApiKey = flowApiKey.trim();
-        String cleanSecretKey = flowSecretKey.trim();
-
+    private Map<String, Object> consultarEstadoRegistro(String token) {
         Map<String, String> params = new TreeMap<>();
-        params.put("apiKey", cleanApiKey);
         params.put("token", token);
-
-        StringBuilder dataToSign = new StringBuilder();
-        for (Map.Entry<String, String> entry : params.entrySet()) {
-            if (dataToSign.length() > 0) {
-                dataToSign.append("&");
-            }
-            dataToSign.append(entry.getKey()).append("=").append(entry.getValue());
-        }
-
-        Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
-        SecretKeySpec secret_key = new SecretKeySpec(cleanSecretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-        sha256_HMAC.init(secret_key);
-        byte[] hash = sha256_HMAC.doFinal(dataToSign.toString().getBytes(StandardCharsets.UTF_8));
-
-        StringBuilder hexString = new StringBuilder();
-        for (byte b : hash) {
-            String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) hexString.append('0');
-            hexString.append(hex);
-        }
-        params.put("s", hexString.toString());
-
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(FLOW_BASE_URL + "/customer/getRegisterStatus");
-        params.forEach(builder::queryParam);
-
-        RestTemplate restTemplate = new RestTemplate();
-        try {
-            ParameterizedTypeReference<Map<String, Object>> responseType = new ParameterizedTypeReference<>() {};
-            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    builder.toUriString(), HttpMethod.GET, null, responseType);
-            return response.getBody();
-        } catch (HttpStatusCodeException e) {
-            throw new RuntimeException("Rechazo de Flow GET (" + e.getStatusCode() + "): " + e.getResponseBodyAsString());
-        }
+        return flowGet("/customer/getRegisterStatus", params);
     }
 
-    private Map<String, Object> enviarPeticionFlow(String endpoint, Map<String, String> params) throws Exception {
-        String cleanApiKey = flowApiKey.trim();
-        String cleanSecretKey = flowSecretKey.trim();
+    private Map<String, Object> consultarEstadoSuscripcion(String subscriptionId) {
+        Map<String, String> params = new TreeMap<>();
+        params.put("subscriptionId", subscriptionId);
+        return flowGet("/subscription/get", params);
+    }
 
-        params.put("apiKey", cleanApiKey);
-        
-        StringBuilder dataToSign = new StringBuilder();
-        for (Map.Entry<String, String> entry : params.entrySet()) {
-            if (dataToSign.length() > 0) {
-                dataToSign.append("&");
-            }
-            dataToSign.append(entry.getKey()).append("=").append(entry.getValue());
-        }
-
-        Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
-        SecretKeySpec secret_key = new SecretKeySpec(cleanSecretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-        sha256_HMAC.init(secret_key);
-        byte[] hash = sha256_HMAC.doFinal(dataToSign.toString().getBytes(StandardCharsets.UTF_8));
-        
-        StringBuilder hexString = new StringBuilder();
-        for (byte b : hash) {
-            String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) hexString.append('0');
-            hexString.append(hex);
-        }
-        params.put("s", hexString.toString()); 
+    // ------------------------------------------------------------------
+    // HTTP + FIRMA
+    // ------------------------------------------------------------------
+    private Map<String, Object> flowPost(String endpoint, Map<String, String> params) {
+        params.put("apiKey", flowApiKey.trim());
+        params.put("s", firmar(params)); // se firma antes de insertar "s"
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
-        MultiValueMap<String, String> map = new LinkedMultiValueMap<>();
-        for (Map.Entry<String, String> entry : params.entrySet()) {
-            map.add(entry.getKey(), entry.getValue());
-        }
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        params.forEach(body::add);
 
-        HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(map, headers);
-        RestTemplate restTemplate = new RestTemplate();
         try {
-            ParameterizedTypeReference<Map<String, Object>> responseType = new ParameterizedTypeReference<>() {};
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    FLOW_BASE_URL + endpoint, HttpMethod.POST, request, responseType);
+                    FLOW_BASE_URL + endpoint, HttpMethod.POST, new HttpEntity<>(body, headers), MAP_TYPE);
             return response.getBody();
         } catch (HttpStatusCodeException e) {
-            String errorRealFlow = e.getResponseBodyAsString();
-            throw new RuntimeException("Rechazo de Flow (" + e.getStatusCode() + "): " + errorRealFlow);
+            log.error("Flow POST {} -> {} | body: [{}]", endpoint, e.getStatusCode(), e.getResponseBodyAsString());
+            throw new RuntimeException("Rechazo de Flow (" + e.getStatusCode() + "): " + e.getResponseBodyAsString());
         }
     }
 
-    private Map<String, Object> consultarEstadoSuscripcion(String subscriptionId) throws Exception {
-        String cleanApiKey = flowApiKey.trim();
-        String cleanSecretKey = flowSecretKey.trim();
+    private Map<String, Object> flowGet(String endpoint, Map<String, String> params) {
+        params.put("apiKey", flowApiKey.trim());
+        params.put("s", firmar(params));
 
-        Map<String, String> params = new TreeMap<>();
-        params.put("apiKey", cleanApiKey);
-        params.put("subscriptionId", subscriptionId); 
-
-        StringBuilder dataToSign = new StringBuilder();
-        for (Map.Entry<String, String> entry : params.entrySet()) {
-            if (dataToSign.length() > 0) {
-                dataToSign.append("&");
-            }
-            dataToSign.append(entry.getKey()).append("=").append(entry.getValue());
-        }
-
-        Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
-        SecretKeySpec secret_key = new SecretKeySpec(cleanSecretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-        sha256_HMAC.init(secret_key);
-        byte[] hash = sha256_HMAC.doFinal(dataToSign.toString().getBytes(StandardCharsets.UTF_8));
-
-        StringBuilder hexString = new StringBuilder();
-        for (byte b : hash) {
-            String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) hexString.append('0');
-            hexString.append(hex);
-        }
-        params.put("s", hexString.toString());
-
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(FLOW_BASE_URL + "/subscription/get");
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(FLOW_BASE_URL + endpoint);
         params.forEach(builder::queryParam);
+        URI uri = builder.build().encode().toUri();
 
-        RestTemplate restTemplate = new RestTemplate();
         try {
-            ParameterizedTypeReference<Map<String, Object>> responseType = new ParameterizedTypeReference<>() {};
-            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    builder.toUriString(), HttpMethod.GET, null, responseType);
+            ResponseEntity<Map<String, Object>> response =
+                    restTemplate.exchange(uri, HttpMethod.GET, null, MAP_TYPE);
             return response.getBody();
         } catch (HttpStatusCodeException e) {
-            throw new RuntimeException("Error consultando suscripción (" + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+            log.error("Flow GET {} -> {} | body: [{}]", endpoint, e.getStatusCode(), e.getResponseBodyAsString());
+            throw new RuntimeException("Rechazo de Flow GET (" + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+        }
+    }
+
+    /**
+     * Firma HMAC-SHA256 de Flow: parámetros ordenados alfabéticamente (TreeMap),
+     * concatenando nombre+valor sin separadores. No debe incluir "s".
+     */
+    private String firmar(Map<String, String> params) {
+        try {
+            StringBuilder toSign = new StringBuilder();
+            for (Map.Entry<String, String> e : params.entrySet()) {
+                if ("s".equals(e.getKey())) continue;
+                toSign.append(e.getKey()).append(e.getValue());
+            }
+
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(flowSecretKey.trim().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] hash = mac.doFinal(toSign.toString().getBytes(StandardCharsets.UTF_8));
+
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("Error firmando petición a Flow", e);
         }
     }
 }
