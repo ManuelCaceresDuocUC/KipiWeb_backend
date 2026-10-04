@@ -15,8 +15,8 @@ public interface ClienteRepository extends JpaRepository<Cliente, Long> {
 
     Optional<Cliente> findByRut(String rut);
 
-    // ✨ Normaliza c.rut eliminando '.' y '-' en la base de datos para comparar con terminoLimpio
-    @Query("SELECT c FROM Cliente c WHERE c.empresaId = :empresaId AND " +
+    // ✨ CORREGIDO: c.empresaId cambiado a c.empresa.id para coincidir con el campo de la entidad
+    @Query("SELECT c FROM Cliente c WHERE c.empresa.id = :empresaId AND " +
            "(LOWER(c.nombre) LIKE LOWER(CONCAT('%', :termino, '%')) OR " +
            "REPLACE(REPLACE(c.rut, '.', ''), '-', '') LIKE CONCAT('%', :terminoLimpio, '%'))")
     List<Cliente> buscarPorTerminoYEmpresa(
