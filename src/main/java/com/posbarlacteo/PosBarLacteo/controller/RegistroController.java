@@ -54,8 +54,6 @@ public class RegistroController {
     @Value("${flow.secret.key}")
     private String flowSecretKey;
 
-    // Inyectamos las URLs desde el application.properties
-    // Se añade un valor por defecto después de los dos puntos (:) por si olvidas configurarlo
     @Value("${app.frontend.url:https://www.kipipos.cl}")
     private String frontendUrl;
 
@@ -69,17 +67,17 @@ public class RegistroController {
     @Transactional(rollbackFor = Exception.class) 
     public ResponseEntity<?> registrarEmpresaCompleta(@RequestBody RegistroEmpresaDTO data) {
         log.info("--- DEBUG FLOW KEYS ---");
-    log.info("API Key leída: [{}]", flowApiKey);
-    if(flowSecretKey != null && flowSecretKey.length() > 4) {
-        log.info("Secret Key leída empieza con: [{}]", flowSecretKey.substring(0, 4) + "...");
-    } else {
-        log.info("Secret Key está VACÍA o es nula");
-    }
-    log.info("-----------------------");
+        log.info("API Key leída: [{}]", flowApiKey);
+        if(flowSecretKey != null && flowSecretKey.length() > 4) {
+            log.info("Secret Key leída empieza con: [{}]", flowSecretKey.substring(0, 4) + "...");
+        } else {
+            log.info("Secret Key está VACÍA o es nula");
+        }
+        log.info("-----------------------");
         log.info("Datos recibidos: Correo={}, RazonSocial={}, Rut={}", 
-        data.getAdmin().getCorreo(), 
-        data.getEmpresa().getRazon_social(), 
-        data.getEmpresa().getRut_empresa());
+            data.getAdmin().getCorreo(), 
+            data.getEmpresa().getRazon_social(), 
+            data.getEmpresa().getRut_empresa());
         
         try {
             // 1. Crear cliente en Flow
@@ -95,7 +93,7 @@ public class RegistroController {
             
             nuevaEmpresa.setFlowCustomerId(customerId); 
             nuevaEmpresa.setEstado("PENDIENTE"); 
-            nuevaEmpresa.setActivo(false); // <-- NUEVA LÍNEA: 0 en base de datos
+            nuevaEmpresa.setActivo(false);
             empresaRepository.save(nuevaEmpresa);
 
             // 3. Guardar el usuario administrador
@@ -163,7 +161,7 @@ public class RegistroController {
                     }
                     
                     empresa.setEstado("ACTIVA");
-                    empresa.setActivo(true); // <-- NUEVA LÍNEA: Cambia a 1 en base de datos
+                    empresa.setActivo(true);
                     empresaRepository.save(empresa);
                     
                     log.info("Empresa activada (Trial/Activa). Suscripción ID: {}", suscripcion.get("subscriptionId"));
@@ -244,7 +242,10 @@ public class RegistroController {
 
         StringBuilder dataToSign = new StringBuilder();
         for (Map.Entry<String, String> entry : params.entrySet()) {
-            dataToSign.append(entry.getKey()).append(entry.getValue());
+            if (dataToSign.length() > 0) {
+                dataToSign.append("&");
+            }
+            dataToSign.append(entry.getKey()).append("=").append(entry.getValue());
         }
 
         Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
@@ -282,7 +283,10 @@ public class RegistroController {
         
         StringBuilder dataToSign = new StringBuilder();
         for (Map.Entry<String, String> entry : params.entrySet()) {
-            dataToSign.append(entry.getKey()).append(entry.getValue());
+            if (dataToSign.length() > 0) {
+                dataToSign.append("&");
+            }
+            dataToSign.append(entry.getKey()).append("=").append(entry.getValue());
         }
 
         Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
@@ -329,7 +333,10 @@ public class RegistroController {
 
         StringBuilder dataToSign = new StringBuilder();
         for (Map.Entry<String, String> entry : params.entrySet()) {
-            dataToSign.append(entry.getKey()).append(entry.getValue());
+            if (dataToSign.length() > 0) {
+                dataToSign.append("&");
+            }
+            dataToSign.append(entry.getKey()).append("=").append(entry.getValue());
         }
 
         Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
