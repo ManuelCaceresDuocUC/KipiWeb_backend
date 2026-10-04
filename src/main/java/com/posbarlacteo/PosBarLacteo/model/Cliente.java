@@ -2,9 +2,12 @@ package com.posbarlacteo.PosBarLacteo.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Data;
 
@@ -16,8 +19,10 @@ public class Cliente {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "empresa_id")
-    private Long empresaId;
+    // ✨ CORREGIDO: Cambiado de Long a objeto Empresa para mantener la consistencia JPA
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "empresa_id")
+    private Empresa empresa;
 
     @Column(nullable = false)
     private String nombre;
@@ -25,7 +30,6 @@ public class Cliente {
     private String rut;
     private String telefono;
 
-    // ✨ AGREGAR ESTA LÍNEA
     private String email;
 
     @Column(name = "limite_credito")

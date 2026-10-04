@@ -9,7 +9,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint; // Añadido para la restricción compuesta
+import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 
 @Entity
@@ -25,15 +25,12 @@ public class Usuario {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Nombre de usuario para iniciar sesión (ej: "admin", "juan_vendedor")
-    // SE ELIMINÓ unique = true
     @Column(name = "usuario", nullable = false)
     private String usuario;
 
     @Column(name = "contrasena")
     private String contrasena;
 
-    // ✨ NUEVO CAMPO: Correo de contacto (opcional en BD para que los vendedores no lo requieran)
     @Column(name = "correo")
     private String correo;
 
@@ -43,4 +40,9 @@ public class Usuario {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "empresa_id", nullable = false)
     private Empresa empresa;
+
+    // ✨ NUEVO CAMPO: Relación con la sucursal
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sucursal_id", nullable = true) // Puede ser false si TODO usuario debe tener sucursal
+    private Sucursal sucursal;
 }

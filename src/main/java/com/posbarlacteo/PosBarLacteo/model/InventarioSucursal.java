@@ -9,9 +9,11 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.Data;
 
 @Entity
 @Table(name = "inventario_sucursal")
+@Data // ✨ AÑADIDO para generar Getters, Setters y constructores automáticamente
 public class InventarioSucursal {
 
     @Id
@@ -31,6 +33,4 @@ public class InventarioSucursal {
 
     @Column(name = "stock_critico")
     private Double stockCritico = 0.0;
-
-    // Constructores, Getters y Setters
 }

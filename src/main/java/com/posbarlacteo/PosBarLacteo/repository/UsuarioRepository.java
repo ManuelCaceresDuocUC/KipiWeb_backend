@@ -7,10 +7,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.posbarlacteo.PosBarLacteo.model.Usuario;
 
-
 public interface UsuarioRepository extends JpaRepository<Usuario, Long>{
     
-
     Optional<Usuario> findByUsuario(String usuario);
     List<Usuario> findByEmpresaId(Long empresaId);
+    
+    // ✨ NUEVO MÉTODO PARA FILTRAR POR SUCURSAL
+    List<Usuario> findBySucursalId(Long sucursalId);
 }

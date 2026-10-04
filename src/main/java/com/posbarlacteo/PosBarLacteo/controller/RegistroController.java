@@ -33,8 +33,10 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import com.posbarlacteo.PosBarLacteo.dto.RegistroEmpresaDTO;
 import com.posbarlacteo.PosBarLacteo.model.Empresa;
+import com.posbarlacteo.PosBarLacteo.model.Sucursal;
 import com.posbarlacteo.PosBarLacteo.model.Usuario;
 import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
+import com.posbarlacteo.PosBarLacteo.repository.SucursalRepository;
 import com.posbarlacteo.PosBarLacteo.repository.UsuarioRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -49,7 +51,7 @@ public class RegistroController {
     private final EmpresaRepository empresaRepository;
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
-
+    private final SucursalRepository sucursalRepository;
     @Value("${flow.api.key}")
     private String flowApiKey;
 
@@ -93,12 +95,26 @@ public class RegistroController {
             nuevaEmpresa.setRazonSocial(data.getEmpresa().getRazon_social());
             nuevaEmpresa.setRutEmpresa(data.getEmpresa().getRut_empresa());
             nuevaEmpresa.setGiro(data.getEmpresa().getGiro());
-            nuevaEmpresa.setDireccion(data.getEmpresa().getDireccion());
-            nuevaEmpresa.setComuna(data.getEmpresa().getComuna());
+            
+            // 👇 CORRECCIÓN: Leemos la dirección y comuna desde la Sucursal que viene en el DTO
+            nuevaEmpresa.setDireccion(data.getSucursal().getDireccion());
+            nuevaEmpresa.setComuna(data.getSucursal().getComuna());
+            
             nuevaEmpresa.setFlowCustomerId(customerId);
             nuevaEmpresa.setEstado("PENDIENTE");
             nuevaEmpresa.setActivo(false);
             empresaRepository.save(nuevaEmpresa);
+            // ✨ 2.5 CREAR SUCURSAL PRINCIPAL (CASA MATRIZ) ✨
+            Sucursal sucursalMatriz = new Sucursal();
+            // Ahora leemos los datos desde el objeto sucursal del DTO:
+            sucursalMatriz.setNombre(data.getSucursal().getNombre()); 
+            sucursalMatriz.setDireccion(data.getSucursal().getDireccion());
+            sucursalMatriz.setComuna(data.getSucursal().getComuna());
+            
+            sucursalMatriz.setEsCasaMatriz(true);
+            sucursalMatriz.setEmpresa(nuevaEmpresa);
+            sucursalMatriz.setActivo(true);
+            sucursalRepository.save(sucursalMatriz);
 
             // 3. Usuario administrador
             Usuario nuevoAdmin = new Usuario();
@@ -107,6 +123,7 @@ public class RegistroController {
             nuevoAdmin.setCorreo(data.getAdmin().getCorreo());
             nuevoAdmin.setRol(data.getAdmin().getRol() != null ? data.getAdmin().getRol() : "admin");
             nuevoAdmin.setEmpresa(nuevaEmpresa);
+            nuevoAdmin.setSucursal(sucursalMatriz);
             usuarioRepository.save(nuevoAdmin);
 
             // 3.5 Empleados adicionales
@@ -118,6 +135,7 @@ public class RegistroController {
                     nuevoEmpleado.setCorreo(empData.getUsuario() + "@" + data.getEmpresa().getRut_empresa() + ".local");
                     nuevoEmpleado.setRol(empData.getRol() != null ? empData.getRol() : "vendedor");
                     nuevoEmpleado.setEmpresa(nuevaEmpresa);
+                    nuevoEmpleado.setSucursal(sucursalMatriz);
                     usuarioRepository.save(nuevoEmpleado);
                 }
             }
