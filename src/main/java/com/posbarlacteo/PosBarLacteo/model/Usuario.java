@@ -9,10 +9,16 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint; // Añadido para la restricción compuesta
 import lombok.Data;
 
 @Entity
-@Table(name = "pos_usuarios")
+@Table(
+    name = "pos_usuarios", 
+    uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"usuario", "empresa_id"})
+    }
+)
 @Data
 public class Usuario {
     @Id
@@ -20,7 +26,8 @@ public class Usuario {
     private Long id;
 
     // Nombre de usuario para iniciar sesión (ej: "admin", "juan_vendedor")
-    @Column(name = "usuario", unique = true, nullable = false)
+    // SE ELIMINÓ unique = true
+    @Column(name = "usuario", nullable = false)
     private String usuario;
 
     @Column(name = "contrasena")
