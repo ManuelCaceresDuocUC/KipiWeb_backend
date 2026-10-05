@@ -75,6 +75,13 @@ public class VentaService {
             Usuario usuario = usuarioRepository.findById(usuarioId)
                 .orElseThrow(() -> new RuntimeException("Usuario cajero no encontrado"));
             venta.setUsuario(usuario);
+
+            // ✨ SOLUCIÓN AL ERROR: Asignar la sucursal del usuario a la venta
+            if (usuario.getSucursal() == null) {
+                throw new RuntimeException("El usuario cajero no tiene una sucursal asignada.");
+            }
+            venta.setSucursal(usuario.getSucursal()); 
+
         } else {
             throw new RuntimeException("El ID del cajero es obligatorio para registrar la venta");
         }
@@ -122,6 +129,8 @@ public class VentaService {
         }
         
         venta.setDetalles(detalles);
+        
+        // Al ejecutar .save(venta) ahora sucursal ya no estará en null
         ventaRepository.save(venta);
 
         TurnoCaja turnoActivo = turnoCajaRepository.findByCajeroIdAndEstado(usuarioId, "ABIERTA")
@@ -137,14 +146,14 @@ public class VentaService {
             
         } else if ("TARJETA".equalsIgnoreCase(metodoPago)) {
             BigDecimal tarjetaActual = turnoActivo.getVentasTarjeta() != null 
-                                       ? turnoActivo.getVentasTarjeta() 
-                                       : BigDecimal.ZERO;
+                                    ? turnoActivo.getVentasTarjeta() 
+                                    : BigDecimal.ZERO;
             turnoActivo.setVentasTarjeta(tarjetaActual.add(montoEnBigDecimal));
             
         } else if ("CREDITO".equalsIgnoreCase(metodoPago)) {
             BigDecimal creditoActual = turnoActivo.getVentasCredito() != null 
-                                       ? turnoActivo.getVentasCredito() 
-                                       : BigDecimal.ZERO;
+                                    ? turnoActivo.getVentasCredito() 
+                                    : BigDecimal.ZERO;
             turnoActivo.setVentasCredito(creditoActual.add(montoEnBigDecimal));
             
             // Genera e imprime el Vale de Crédito de la venta fiada
