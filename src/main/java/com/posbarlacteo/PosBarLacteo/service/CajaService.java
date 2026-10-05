@@ -41,15 +41,23 @@ public class CajaService {
         Usuario usuario = usuarioRepository.findById(usuarioId)
             .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
             
-        // ✨ CORRECCIÓN AQUÍ: Se obtiene el ID desde el objeto Empresa del Usuario
+        // 1. Obtener la empresa del usuario
         Long empresaIdReal = usuario.getEmpresa().getId(); 
-
         Empresa empresa = empresaRepository.findById(empresaIdReal)
             .orElseThrow(() -> new RuntimeException("Empresa no encontrada"));
+
+        // ✨ 2. Obtener la sucursal del usuario (Asegúrate de que tu entidad Usuario tenga getSucursal())
+        if (usuario.getSucursal() == null) {
+            throw new RuntimeException("El usuario no tiene una sucursal asignada.");
+        }
 
         TurnoCaja turno = new TurnoCaja();
         turno.setCajeroId(usuarioId); 
         turno.setEmpresa(empresa); 
+        
+        // ✨ 3. ASIGNAR LA SUCURSAL OBLIGATORIA
+        turno.setSucursal(usuario.getSucursal()); 
+        
         turno.setFechaApertura(LocalDateTime.now());
         turno.setMontoApertura(montoInicial); 
         turno.setEstado("ABIERTA"); 
