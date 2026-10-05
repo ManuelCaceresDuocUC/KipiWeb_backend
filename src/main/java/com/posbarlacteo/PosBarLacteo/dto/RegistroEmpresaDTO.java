@@ -6,10 +6,10 @@ import lombok.Data;
 
 @Data
 public class RegistroEmpresaDTO {
-    
+
     private EmpresaDTO empresa;
-    private SucursalDTO sucursal; // ✨ NUEVO: Agregamos el objeto sucursal
-    private UsuarioDTO admin;
+    private List<SucursalDTO> sucursales; // ✨ Lista de sucursales
+    private AdminDTO admin;
     private List<UsuarioDTO> empleados;
 
     @Data
@@ -17,10 +17,8 @@ public class RegistroEmpresaDTO {
         private String rut_empresa;
         private String razon_social;
         private String giro;
-        // 🗑️ Eliminamos direccion y comuna de aquí porque ahora van en la sucursal
     }
 
-    // ✨ NUEVA CLASE: Representa los datos de la sucursal matriz que envía el frontend
     @Data
     public static class SucursalDTO {
         private String nombre;
@@ -29,10 +27,18 @@ public class RegistroEmpresaDTO {
     }
 
     @Data
-    public static class UsuarioDTO {
+    public static class AdminDTO {
         private String usuario;
         private String correo;
         private String contrasena;
         private String rol;
+    }
+
+    @Data
+    public static class UsuarioDTO {
+        private String usuario;
+        private String contrasena;
+        private String rol;
+        private String sucursalNombre; // ✨ Sucursal a la que pertenece el empleado
     }
 }

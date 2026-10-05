@@ -52,6 +52,7 @@ public class RegistroController {
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
     private final SucursalRepository sucursalRepository;
+
     @Value("${flow.api.key}")
     private String flowApiKey;
 
@@ -90,33 +91,52 @@ public class RegistroController {
                     data.getEmpresa().getRazon_social(),
                     data.getEmpresa().getRut_empresa());
 
-            // 2. Guardar empresa PENDIENTE / INACTIVA
+            // 2. Obtener primera sucursal para la dirección principal de la empresa
+            RegistroEmpresaDTO.SucursalDTO primeraSucursal = (data.getSucursales() != null && !data.getSucursales().isEmpty())
+                    ? data.getSucursales().get(0)
+                    : null;
+
             Empresa nuevaEmpresa = new Empresa();
             nuevaEmpresa.setRazonSocial(data.getEmpresa().getRazon_social());
             nuevaEmpresa.setRutEmpresa(data.getEmpresa().getRut_empresa());
             nuevaEmpresa.setGiro(data.getEmpresa().getGiro());
-            
-            // 👇 CORRECCIÓN: Leemos la dirección y comuna desde la Sucursal que viene en el DTO
-            nuevaEmpresa.setDireccion(data.getSucursal().getDireccion());
-            nuevaEmpresa.setComuna(data.getSucursal().getComuna());
-            
+
+            if (primeraSucursal != null) {
+                nuevaEmpresa.setDireccion(primeraSucursal.getDireccion());
+                nuevaEmpresa.setComuna(primeraSucursal.getComuna());
+            }
+
             nuevaEmpresa.setFlowCustomerId(customerId);
             nuevaEmpresa.setEstado("PENDIENTE");
             nuevaEmpresa.setActivo(false);
             empresaRepository.save(nuevaEmpresa);
-            // ✨ 2.5 CREAR SUCURSAL PRINCIPAL (CASA MATRIZ) ✨
-            Sucursal sucursalMatriz = new Sucursal();
-            // Ahora leemos los datos desde el objeto sucursal del DTO:
-            sucursalMatriz.setNombre(data.getSucursal().getNombre()); 
-            sucursalMatriz.setDireccion(data.getSucursal().getDireccion());
-            sucursalMatriz.setComuna(data.getSucursal().getComuna());
-            
-            sucursalMatriz.setEsCasaMatriz(true);
-            sucursalMatriz.setEmpresa(nuevaEmpresa);
-            sucursalMatriz.setActivo(true);
-            sucursalRepository.save(sucursalMatriz);
 
-            // 3. Usuario administrador
+            // ✨ 2.5 CREAR TODAS LAS SUCURSALES REGISTRADAS ✨
+            Map<String, Sucursal> sucursalesGuardadas = new HashMap<>();
+            Sucursal sucursalMatriz = null;
+
+            if (data.getSucursales() != null && !data.getSucursales().isEmpty()) {
+                for (int i = 0; i < data.getSucursales().size(); i++) {
+                    RegistroEmpresaDTO.SucursalDTO sucDto = data.getSucursales().get(i);
+
+                    Sucursal sucursal = new Sucursal();
+                    sucursal.setNombre(sucDto.getNombre());
+                    sucursal.setDireccion(sucDto.getDireccion());
+                    sucursal.setComuna(sucDto.getComuna());
+                    sucursal.setEsCasaMatriz(i == 0); // La primera sucursal ingresada es Casa Matriz
+                    sucursal.setEmpresa(nuevaEmpresa);
+                    sucursal.setActivo(true);
+
+                    Sucursal guardada = sucursalRepository.save(sucursal);
+                    sucursalesGuardadas.put(guardada.getNombre(), guardada);
+
+                    if (i == 0) {
+                        sucursalMatriz = guardada;
+                    }
+                }
+            }
+
+            // 3. Usuario administrador (asociado a la Casa Matriz)
             Usuario nuevoAdmin = new Usuario();
             nuevoAdmin.setUsuario(data.getAdmin().getUsuario());
             nuevoAdmin.setContrasena(passwordEncoder.encode(data.getAdmin().getContrasena()));
@@ -126,7 +146,7 @@ public class RegistroController {
             nuevoAdmin.setSucursal(sucursalMatriz);
             usuarioRepository.save(nuevoAdmin);
 
-            // 3.5 Empleados adicionales
+            // ✨ 3.5 Empleados adicionales asignados dinámicamente a sus sucursales ✨
             if (data.getEmpleados() != null && !data.getEmpleados().isEmpty()) {
                 for (RegistroEmpresaDTO.UsuarioDTO empData : data.getEmpleados()) {
                     Usuario nuevoEmpleado = new Usuario();
@@ -135,12 +155,22 @@ public class RegistroController {
                     nuevoEmpleado.setCorreo(empData.getUsuario() + "@" + data.getEmpresa().getRut_empresa() + ".local");
                     nuevoEmpleado.setRol(empData.getRol() != null ? empData.getRol() : "vendedor");
                     nuevoEmpleado.setEmpresa(nuevaEmpresa);
-                    nuevoEmpleado.setSucursal(sucursalMatriz);
+
+                    // Buscar sucursal por el nombre recibido desde el frontend
+                    Sucursal sucursalAsignada = null;
+                    if (empData.getSucursalNombre() != null) {
+                        sucursalAsignada = sucursalesGuardadas.get(empData.getSucursalNombre());
+                    }
+                    if (sucursalAsignada == null) {
+                        sucursalAsignada = sucursalMatriz; // Fallback
+                    }
+
+                    nuevoEmpleado.setSucursal(sucursalAsignada);
                     usuarioRepository.save(nuevoEmpleado);
                 }
             }
 
-            // 4. URL de registro de tarjeta
+            // 4. URL de registro de tarjeta Flow
             String urlReturn = backendUrl + "/api/auth/registro-exitoso";
             String urlRegistroTarjeta = generarEnlaceRegistroTarjeta(customerId, urlReturn);
 
@@ -261,7 +291,7 @@ public class RegistroController {
     // ------------------------------------------------------------------
     private Map<String, Object> flowPost(String endpoint, Map<String, String> params) {
         params.put("apiKey", flowApiKey.trim());
-        params.put("s", firmar(params)); // se firma antes de insertar "s"
+        params.put("s", firmar(params));
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -297,10 +327,6 @@ public class RegistroController {
         }
     }
 
-    /**
-     * Firma HMAC-SHA256 de Flow: parámetros ordenados alfabéticamente (TreeMap),
-     * concatenando nombre+valor sin separadores. No debe incluir "s".
-     */
     private String firmar(Map<String, String> params) {
         try {
             StringBuilder toSign = new StringBuilder();
