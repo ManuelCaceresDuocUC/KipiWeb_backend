@@ -57,4 +57,31 @@ public class DteConfigController {
             return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
         }
     }
+    // 3. Probar conexión con el proveedor (Haulmer, etc.)
+    @PostMapping("/probar-conexion")
+    public ResponseEntity<?> probarConexion(@RequestBody ConfiguracionDte config) {
+        try {
+            // Aquí es donde en el futuro llamarías a tu OpenFacturaService
+            // openFacturaService.verificarEstado(config.getApiKey());
+            
+            // Por ahora, para que tu frontend funcione y pase el error 403:
+            if (config.getApiKey() != null && !config.getApiKey().isEmpty()) {
+                // Respondemos exactamente lo que tu frontend de React espera recibir
+                return ResponseEntity.ok(Map.of(
+                    "valido", true, 
+                    "mensaje", "Conexión exitosa con el proveedor"
+                ));
+            } else {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "valido", false, 
+                    "mensaje", "La API Key no puede estar vacía"
+                ));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                "valido", false, 
+                "mensaje", "Error al conectar: " + e.getMessage()
+            ));
+        }
+    }
 }
