@@ -45,6 +45,9 @@ public class OpenFacturaService {
 
         Map<String, Object> idDoc = new HashMap<>();
         idDoc.put("TipoDTE", 39); // 39 = Boleta Electrónica
+        idDoc.put("Folio", 0); // Haulmer exige que vaya en 0 para asignar el folio real
+        idDoc.put("FchEmis", java.time.LocalDate.now().toString()); // Esto genera la fecha en formato AAAA-MM-DD
+        
         encabezado.put("IdDoc", idDoc);
 
         Map<String, Object> emisor = new HashMap<>();
