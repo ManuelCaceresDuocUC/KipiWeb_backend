@@ -78,11 +78,18 @@ public class DteService {
                     return generarVoucherLocal(venta, request);
             }
 
-        } catch (Exception e) {
-            log.error("Error procesando DTE para venta ID {}: {}. Se recurre a voucher local.",
-                      venta.getId(), e.getMessage(), e);
-            // Fallback de seguridad: si la API externa falla o no hay internet, emite el voucher local
-            return generarVoucherLocal(venta, request);
+        }  catch (Exception e) {
+            // Imprimimos el error claramente en la consola
+            System.out.println("🚨 ERROR CRÍTICO HAULMER: " + e.getMessage());
+            e.printStackTrace();
+
+            log.error("Error procesando DTE para venta ID {}: {}", venta.getId(), e.getMessage(), e);
+            
+            // 🚨 COMENTAMOS TEMPORALMENTE EL VOUCHER DE RESPALDO
+            // return generarVoucherLocal(venta, request);
+            
+            // Forzamos a que el error suba al frontend
+            throw new RuntimeException("Error en Haulmer: " + e.getMessage());
         }
     }
 }
