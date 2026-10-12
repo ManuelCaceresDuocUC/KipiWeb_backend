@@ -110,6 +110,7 @@ public class VentaService {
             VentaDetalle detalle = new VentaDetalle();
             detalle.setProducto(producto);
             detalle.setCantidad(item.getCantidad());
+            detalle.setPrecioUnitario(producto.getPrecio());
             detalle.setVenta(venta);
             detalles.add(detalle);
         }
