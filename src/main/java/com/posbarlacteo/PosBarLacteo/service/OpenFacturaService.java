@@ -30,7 +30,6 @@ public class OpenFacturaService {
     }
 
     public String emitirBoletaOpenFactura(Venta venta, PagoRequest request, ConfiguracionDte config) {
-        // 1. Selección de URL según el ambiente (dev usa /v2/dte/document)
         String url = "sandbox".equalsIgnoreCase(config.getAmbiente()) || "desarrollo".equalsIgnoreCase(config.getAmbiente())
                 ? "https://dev-api.haulmer.com/v2/dte/document"
                 : "https://api.haulmer.com/v2/dte/issue";
@@ -39,18 +38,18 @@ public class OpenFacturaService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("apikey", config.getApiKey());
 
-        // 2. Uso de LinkedHashMap para preservar el orden estricto de campos del SII
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("response", List.of("PDF"));
 
         Map<String, Object> dte = new LinkedHashMap<>();
         Map<String, Object> encabezado = new LinkedHashMap<>();
 
-        // -- IdDoc --
+        // -- IdDoc (Orden estricto del SII para Boleta DTE 39) --
         Map<String, Object> idDoc = new LinkedHashMap<>();
-        idDoc.put("TipoDTE", 39); // 39 = Boleta Electrónica
-        idDoc.put("Folio", 0);     // 0 para que Haulmer asigne el folio automático
-        idDoc.put("FchEmis", LocalDate.now().toString()); // Fecha en formato AAAA-MM-DD
+        idDoc.put("TipoDTE", 39);                           // 1. Tipo DTE (39 = Boleta)
+        idDoc.put("Folio", 0);                              // 2. Folio (0 para asignación automática)
+        idDoc.put("FchEmis", LocalDate.now().toString());   // 3. Fecha de emisión (AAAA-MM-DD)
+        idDoc.put("IndServicio", 3);                        // 4. Indicador de Servicio (3 = Ventas y servicios)
         encabezado.put("IdDoc", idDoc);
 
         // -- Emisor --
@@ -85,8 +84,6 @@ public class OpenFacturaService {
             
             double precioUnit = detalle.getPrecioUnitario() != null ? detalle.getPrecioUnitario() : 0.0;
             det.put("PrcItem", Math.round(precioUnit));
-            
-            // Campo corregido según estándar SII / Haulmer
             det.put("MontoItem", Math.round(precioUnit * detalle.getCantidad()));
             detalles.add(det);
         }
