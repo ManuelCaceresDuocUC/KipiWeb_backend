@@ -13,8 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.posbarlacteo.PosBarLacteo.dto.AbonoRequest;
 import com.posbarlacteo.PosBarLacteo.dto.PagoRequest;
 import com.posbarlacteo.PosBarLacteo.model.Venta;
-import com.posbarlacteo.PosBarLacteo.service.VentaService; // Servicio para crear el PDF del voucher
-import com.posbarlacteo.PosBarLacteo.service.VoucherService;
+import com.posbarlacteo.PosBarLacteo.service.DteService; // Nuevo servicio orquestador
+import com.posbarlacteo.PosBarLacteo.service.VentaService;
 
 @RestController
 @CrossOrigin(origins = {
@@ -28,11 +28,11 @@ import com.posbarlacteo.PosBarLacteo.service.VoucherService;
 public class PagoController {
 
     private final VentaService ventaService;
-    private final VoucherService voucherService; // Nuevo servicio local para vouchers
+    private final DteService dteService; // Inyección de DteService
 
-    public PagoController(VentaService ventaService, VoucherService voucherService) {
+    public PagoController(VentaService ventaService, DteService dteService) {
         this.ventaService = ventaService;
-        this.voucherService = voucherService;
+        this.dteService = dteService;
     }
 
     @PostMapping("/efectivo")
@@ -47,17 +47,18 @@ public class PagoController {
                 request.getClienteId()
             );
 
-            // Genera PDF local en Base64 con 2 copias (Cliente + Local)
-            String base64Pdf = voucherService.generarVoucherBase64(venta, request.getItems());
+            // Genera DTE Oficial o Voucher Local según la configuración de la empresa
+            String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, "EFECTIVO");
 
             return ResponseEntity.ok(Map.of(
                 "status", "success", 
-                "message", "Venta en efectivo registrada y voucher generado",
+                "message", "Venta en efectivo registrada correctamente",
                 "ventaId", venta.getId(),
                 "boletaPdf", base64Pdf
             ));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("message", e.getMessage()));
         }
     }
 
@@ -77,17 +78,18 @@ public class PagoController {
                 request.getClienteId()
             );
             
-            // Genera PDF local en Base64 con 2 copias (Cliente + Local)
-            String base64Pdf = voucherService.generarVoucherBase64(venta, request.getItems());
+            // Evalúa si emite DTE para tarjeta o genera voucher informativo
+            String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, "TARJETA");
             
             return ResponseEntity.ok(Map.of(
                 "status", "success", 
-                "message", "Venta con tarjeta registrada y voucher generado",
+                "message", "Venta con tarjeta registrada correctamente",
                 "ventaId", venta.getId(),
                 "boletaPdf", base64Pdf
             ));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("message", e.getMessage()));
         }
     }
 
@@ -107,7 +109,7 @@ public class PagoController {
                 request.getClienteId() 
             );
 
-            String base64Pdf = voucherService.generarVoucherBase64(venta, request.getItems());
+            String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, "CREDITO");
 
             return ResponseEntity.ok(Map.of(
                 "status", "success", 
@@ -117,7 +119,8 @@ public class PagoController {
             ));
 
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("message", e.getMessage()));
         }
     }
 
