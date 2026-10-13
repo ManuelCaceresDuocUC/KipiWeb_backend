@@ -44,12 +44,12 @@ public class OpenFacturaService {
         Map<String, Object> dte = new LinkedHashMap<>();
         Map<String, Object> encabezado = new LinkedHashMap<>();
 
-        // -- IdDoc (Orden estricto del SII para Boleta DTE 39) --
+        // -- IdDoc (Orden estricto exigido por el esquema XML) --
         Map<String, Object> idDoc = new LinkedHashMap<>();
-        idDoc.put("TipoDTE", 39);                           // 1. Tipo DTE (39 = Boleta)
-        idDoc.put("Folio", 0);                              // 2. Folio (0 para asignación automática)
-        idDoc.put("FchEmis", LocalDate.now().toString());   // 3. Fecha de emisión (AAAA-MM-DD)
-        idDoc.put("IndServicio", 3);                        // 4. Indicador de Servicio (3 = Ventas y servicios)
+        idDoc.put("TipoDTE", 39);                           // 39 = Boleta Electrónica
+        idDoc.put("Folio", 0);                              // 0 para asignación automática
+        idDoc.put("FchEmis", LocalDate.now().toString());   // Fecha AAAA-MM-DD
+        idDoc.put("IndServicio", 3);                        // 3 = Ventas y servicios
         encabezado.put("IdDoc", idDoc);
 
         // -- Emisor --
@@ -63,9 +63,15 @@ public class OpenFacturaService {
         receptor.put("RznSocRecep", "Persona Natural");
         encabezado.put("Receptor", receptor);
 
-        // -- Totales --
+        // -- Totales (Desglose obligatorio de Neto, IVA y Total) --
+        long montoTotal = Math.round(request.getMonto());
+        long montoNeto = Math.round(montoTotal / 1.19);
+        long iva = montoTotal - montoNeto;
+
         Map<String, Object> totales = new LinkedHashMap<>();
-        totales.put("MntTotal", Math.round(request.getMonto()));
+        totales.put("MntNeto", montoNeto);
+        totales.put("IVA", iva);
+        totales.put("MntTotal", montoTotal);
         encabezado.put("Totales", totales);
 
         dte.put("Encabezado", encabezado);
