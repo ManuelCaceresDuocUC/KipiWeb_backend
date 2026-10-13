@@ -39,16 +39,16 @@ public class OpenFacturaService {
         headers.set("apikey", config.getApiKey());
 
         Map<String, Object> body = new LinkedHashMap<>();
-        // Solicitamos la representación en formato Ticket 80mm mediante la propiedad "response"
-        body.put("response", List.of("80MM")); 
+        // Solicitamos el PDF y especificamos la plantilla 80MM
+        body.put("response", List.of("PDF", "80MM")); 
 
         Map<String, Object> dte = new LinkedHashMap<>();
         Map<String, Object> encabezado = new LinkedHashMap<>();
 
-        // -- IdDoc (Esquema estricto para Boleta DTE 39) --
+        // -- IdDoc --
         Map<String, Object> idDoc = new LinkedHashMap<>();
         idDoc.put("TipoDTE", 39);                           // 39 = Boleta Electrónica
-        idDoc.put("Folio", 0);                              // 0 = Asignación automática
+        idDoc.put("Folio", 0);                              // 0 = Asignación automática por Haulmer
         idDoc.put("FchEmis", LocalDate.now().toString());   // Fecha AAAA-MM-DD
         idDoc.put("IndServicio", 3);                        // 3 = Ventas y servicios
         encabezado.put("IdDoc", idDoc);
@@ -110,14 +110,14 @@ public class OpenFacturaService {
         if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
             Map<String, Object> responseBody = response.getBody();
             
-            // La API de OpenFactura puede retornar la cadena Base64 en la clave "80MM" o "PDF"
-            if (responseBody.containsKey("80MM")) {
-                return (String) responseBody.get("80MM");
-            } else if (responseBody.containsKey("pdf")) {
-                return (String) responseBody.get("pdf");
-            } else if (responseBody.containsKey("PDF")) {
-                return (String) responseBody.get("PDF");
+            // Inspecciona las claves devueltas en la respuesta
+            for (String key : List.of("PDF", "pdf", "80MM", "80mm")) {
+                if (responseBody.containsKey(key) && responseBody.get(key) != null) {
+                    return (String) responseBody.get(key);
+                }
             }
+
+            throw new RuntimeException("Haulmer respondió 200 OK pero no devolvió la clave PDF. Contenido: " + responseBody);
         }
 
         throw new RuntimeException("Error en la respuesta del proveedor DTE: " + response.getStatusCode());
