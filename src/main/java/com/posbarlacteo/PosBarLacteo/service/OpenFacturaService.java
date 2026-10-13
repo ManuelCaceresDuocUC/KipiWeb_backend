@@ -44,11 +44,12 @@ public class OpenFacturaService {
         Map<String, Object> dte = new LinkedHashMap<>();
         Map<String, Object> encabezado = new LinkedHashMap<>();
 
-        // -- IdDoc (Orden estricto exigido por el esquema XML) --
+        // -- IdDoc (Configuración para formato Ticket 80mm) --
         Map<String, Object> idDoc = new LinkedHashMap<>();
         idDoc.put("TipoDTE", 39);                           // 39 = Boleta Electrónica
-        idDoc.put("Folio", 0);                              // 0 para asignación automática
+        idDoc.put("Folio", 0);                              // 0 = Asignación automática
         idDoc.put("FchEmis", LocalDate.now().toString());   // Fecha AAAA-MM-DD
+        idDoc.put("TpoImpresion", "T");                     // 'T' = Formato Ticket / Térmica 80mm
         idDoc.put("IndServicio", 3);                        // 3 = Ventas y servicios
         encabezado.put("IdDoc", idDoc);
 
@@ -63,7 +64,7 @@ public class OpenFacturaService {
         receptor.put("RznSocRecep", "Persona Natural");
         encabezado.put("Receptor", receptor);
 
-        // -- Totales (Desglose obligatorio de Neto, IVA y Total) --
+        // -- Totales --
         long montoTotal = Math.round(request.getMonto());
         long montoNeto = Math.round(montoTotal / 1.19);
         long iva = montoTotal - montoNeto;
