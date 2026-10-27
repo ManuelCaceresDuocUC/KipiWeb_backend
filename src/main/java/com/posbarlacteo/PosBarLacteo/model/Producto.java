@@ -20,7 +20,9 @@ import lombok.Getter;
 import lombok.Setter;
 
 @Entity
-@Table(name = "pos_productos")
+@Table(name = "pos_productos", uniqueConstraints = {
+    @jakarta.persistence.UniqueConstraint(name = "uk_producto_codigo_empresa", columnNames = {"codigo_barras", "empresa_id"})
+})
 @Getter
 @Setter
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
@@ -29,7 +31,7 @@ public class Producto {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "codigo_barras", unique = true)
+    @Column(name = "codigo_barras")
     private String codigoBarras;
 
     @Column(name = "unidad_medida")

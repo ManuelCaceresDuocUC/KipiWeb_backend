@@ -1,17 +1,26 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
 import java.util.Map;
-import java.util.Optional;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import com.posbarlacteo.PosBarLacteo.model.ConfiguracionDte;
 import com.posbarlacteo.PosBarLacteo.repository.ConfiguracionDteRepository;
+import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 
+/**
+ * Configuración DTE de la empresa del token (solo ADMIN, ver SecurityConfig).
+ * La API Key nunca viaja de vuelta al navegador: solo "configurada" y los últimos 4 caracteres.
+ */
 @RestController
 @RequestMapping("/api/dte")
-@CrossOrigin(origins = "*") // Ajusta los orígenes permitidos como en tu otro controller
 public class DteConfigController {
 
     private final ConfiguracionDteRepository repository;
@@ -20,68 +29,59 @@ public class DteConfigController {
         this.repository = repository;
     }
 
-    // 1. Obtener la configuración actual del cliente
-    @GetMapping("/configuracion/{empresaId}")
-    public ResponseEntity<ConfiguracionDte> getConfiguracion(@PathVariable Long empresaId) {
-        Optional<ConfiguracionDte> config = repository.findByEmpresaId(empresaId);
-        
-        // Si existe la retorna, si no, retorna un HTTP 404 o un objeto vacío por defecto
-        return config.map(ResponseEntity::ok)
-                     .orElseGet(() -> ResponseEntity.notFound().build());
+    @GetMapping("/configuracion")
+    public ResponseEntity<ConfiguracionDte> getConfiguracion() {
+        return repository.findByEmpresaId(SecurityUtils.actual().empresaId())
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    // 2. Guardar o actualizar la configuración desde el panel de administración
+    /** Compatibilidad con el frontend anterior: el id de la URL se ignora, manda el token. */
+    @GetMapping("/configuracion/{ignorado}")
+    public ResponseEntity<ConfiguracionDte> getConfiguracionLegacy(@PathVariable String ignorado) {
+        return getConfiguracion();
+    }
+
     @PostMapping("/configuracion")
+    @Transactional
     public ResponseEntity<?> guardarConfiguracion(@RequestBody ConfiguracionDte payload) {
-        try {
-            // Buscamos si ya existe configuración para esta empresa
-            Optional<ConfiguracionDte> existente = repository.findByEmpresaId(payload.getEmpresaId());
-            
-            ConfiguracionDte config = existente.orElse(new ConfiguracionDte());
-            
-            // Actualizamos los campos
-            config.setEmpresaId(payload.getEmpresaId());
-            config.setProveedor(payload.getProveedor());
-            config.setApiKey(payload.getApiKey());
-            config.setApiSecret(payload.getApiSecret());
-            config.setRutEmisor(payload.getRutEmisor());
-            config.setAmbiente(payload.getAmbiente());
-            config.setEmitirBoletaEfectivo(payload.isEmitirBoletaEfectivo());
-            config.setEmitirBoletaTarjeta(payload.isEmitirBoletaTarjeta());
-            config.setEmitirBoletaTransferencia(payload.isEmitirBoletaTransferencia());
-            
-            repository.save(config);
+        Long empresaId = SecurityUtils.actual().empresaId();
+        ConfiguracionDte config = repository.findByEmpresaId(empresaId).orElseGet(ConfiguracionDte::new);
 
-            return ResponseEntity.ok(Map.of("status", "success", "message", "Configuración DTE guardada."));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        config.setEmpresaId(empresaId);
+        config.setProveedor(payload.getProveedor());
+        // Llave en blanco = conservar la que ya estaba guardada
+        if (payload.getApiKey() != null && !payload.getApiKey().isBlank()) {
+            config.setApiKey(payload.getApiKey().trim());
         }
+        if (payload.getApiSecret() != null && !payload.getApiSecret().isBlank()) {
+            config.setApiSecret(payload.getApiSecret().trim());
+        }
+        config.setRutEmisor(payload.getRutEmisor());
+        config.setAmbiente(payload.getAmbiente());
+        config.setEmitirBoletaEfectivo(payload.isEmitirBoletaEfectivo());
+        config.setEmitirBoletaTarjeta(payload.isEmitirBoletaTarjeta());
+        config.setEmitirBoletaTransferencia(payload.isEmitirBoletaTransferencia());
+
+        repository.save(config);
+        return ResponseEntity.ok(Map.of("status", "success", "message", "Configuración DTE guardada."));
     }
-    // 3. Probar conexión con el proveedor (Haulmer, etc.)
+
+    /**
+     * Por ahora solo valida que haya una llave (la enviada o la ya guardada). NO contacta al proveedor,
+     * y el mensaje lo dice con claridad. La verificación real llega con la arquitectura multi-proveedor (Etapa 4).
+     */
     @PostMapping("/probar-conexion")
-    public ResponseEntity<?> probarConexion(@RequestBody ConfiguracionDte config) {
-        try {
-            // Aquí es donde en el futuro llamarías a tu OpenFacturaService
-            // openFacturaService.verificarEstado(config.getApiKey());
-            
-            // Por ahora, para que tu frontend funcione y pase el error 403:
-            if (config.getApiKey() != null && !config.getApiKey().isEmpty()) {
-                // Respondemos exactamente lo que tu frontend de React espera recibir
-                return ResponseEntity.ok(Map.of(
-                    "valido", true, 
-                    "mensaje", "Conexión exitosa con el proveedor"
-                ));
-            } else {
-                return ResponseEntity.badRequest().body(Map.of(
-                    "valido", false, 
-                    "mensaje", "La API Key no puede estar vacía"
-                ));
-            }
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of(
-                "valido", false, 
-                "mensaje", "Error al conectar: " + e.getMessage()
-            ));
+    public ResponseEntity<?> probarConexion(@RequestBody ConfiguracionDte payload) {
+        String llave = payload.getApiKey();
+        if (llave == null || llave.isBlank()) {
+            llave = repository.findByEmpresaId(SecurityUtils.actual().empresaId())
+                    .map(ConfiguracionDte::getApiKey).orElse(null);
         }
+        if (llave == null || llave.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("valido", false, "mensaje", "La API Key no puede estar vacía"));
+        }
+        return ResponseEntity.ok(Map.of("valido", true,
+                "mensaje", "Llave recibida. Aún no se verificó contra el proveedor; la verificación real se habilitará próximamente."));
     }
 }

@@ -1,0 +1,11 @@
+Archivos que la etapa 1 ELIMINA del repositorio backend (ya van borrados en etapa1.patch,
+salvo libs/ y logs/ que se omiten del patch por ser binarios/ruido):
+
+libs/                      (jars de Getnet, jSerialComm y gson: no se usan en producción)
+logs/                      (logs subidos al repo por error)
+.github/workflows/deploy-backend.yml   (contenía una contraseña de base de datos escrita en claro y despliegue a EC2 antiguo)
+src/main/java/com/posbarlacteo/PosBarLacteo/CorsConfig.java              (todo comentado)
+src/main/java/com/posbarlacteo/PosBarLacteo/config/FacturacionConfig.java (sin uso)
+src/main/java/com/posbarlacteo/PosBarLacteo/controller/WebhookController.java (todo comentado)
+src/main/java/com/posbarlacteo/PosBarLacteo/service/FacturacionService.java   (sin uso; guardaba PDFs en C:/Users/manue)
+src/main/java/com/posbarlacteo/PosBarLacteo/dto/AbonoRequest.java        (endpoint /pagos/abono eliminado, el POS usa /clientes/{id}/abonar)

@@ -9,7 +9,10 @@ import com.posbarlacteo.PosBarLacteo.model.Usuario;
 
 public interface UsuarioRepository extends JpaRepository<Usuario, Long>{
     
-    Optional<Usuario> findByUsuario(String usuario);
+    // El nombre de usuario puede repetirse entre empresas en datos antiguos: el login resuelve la ambigüedad.
+    List<Usuario> findAllByUsuario(String usuario);
+
+    boolean existsByUsuario(String usuario);
     List<Usuario> findByEmpresaId(Long empresaId);
     
     // ✨ NUEVO MÉTODO PARA FILTRAR POR SUCURSAL

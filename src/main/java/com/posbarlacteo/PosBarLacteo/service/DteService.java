@@ -78,18 +78,12 @@ public class DteService {
                     return generarVoucherLocal(venta, request);
             }
 
-        }  catch (Exception e) {
-            // Imprimimos el error claramente en la consola
-            System.out.println("🚨 ERROR CRÍTICO HAULMER: " + e.getMessage());
-            e.printStackTrace();
-
+        } catch (Exception e) {
             log.error("Error procesando DTE para venta ID {}: {}", venta.getId(), e.getMessage(), e);
-            
-            // 🚨 COMENTAMOS TEMPORALMENTE EL VOUCHER DE RESPALDO
-            // return generarVoucherLocal(venta, request);
-            
-            // Forzamos a que el error suba al frontend
-            throw new RuntimeException("Error en Haulmer: " + e.getMessage());
+            // La venta ya quedó registrada; se informa claro para que no se repita el cobro.
+            throw new com.posbarlacteo.PosBarLacteo.exception.NegocioException(
+                    "La venta N° " + venta.getId() + " se registró, pero no se pudo emitir el documento tributario: "
+                    + e.getMessage() + ". No repitas el cobro; revisa la configuración DTE.");
         }
     }
 }

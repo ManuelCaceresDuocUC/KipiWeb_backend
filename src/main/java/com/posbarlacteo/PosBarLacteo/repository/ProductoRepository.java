@@ -23,7 +23,8 @@ public interface ProductoRepository extends JpaRepository<Producto, Long> {
     
     // Verificamos el código de barras pero SOLO dentro de la misma empresa
     Optional<Producto> findByCodigoBarrasAndEmpresaId(String codigoBarras, Long empresaId);
-    Optional<Producto> findByCodigoBarras(String codigoBarras);
+    // Siempre se busca dentro de la empresa del usuario autenticado (aislamiento multi-tenant)
+    Optional<Producto> findByIdAndEmpresaId(Long id, Long empresaId);
     
     // Agregamos EntityGraph aquí también para optimizar el filtro por categoría
     @EntityGraph(attributePaths = {"categoria", "empresa"})

@@ -2,152 +2,169 @@ package com.posbarlacteo.PosBarLacteo.service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.posbarlacteo.PosBarLacteo.dto.CierreCajaDTO;
 import com.posbarlacteo.PosBarLacteo.dto.MovimientoCajaDTO;
 import com.posbarlacteo.PosBarLacteo.dto.ResumenCajaDTO;
-import com.posbarlacteo.PosBarLacteo.model.Empresa;
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.model.TurnoCaja;
 import com.posbarlacteo.PosBarLacteo.model.Usuario;
-import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.TurnoCajaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.UsuarioRepository;
+import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 
+/** Toda operación se hace sobre el turno del usuario del token; el cliente nunca indica de quién es la caja. */
 @Service
 public class CajaService {
 
-    @Autowired
-    private TurnoCajaRepository turnoCajaRepository;
+    private static final BigDecimal MAX_MONTO = new BigDecimal("999999999");
 
-    @Autowired
-    private UsuarioRepository usuarioRepository;
+    private final TurnoCajaRepository turnoCajaRepository;
+    private final UsuarioRepository usuarioRepository;
 
-    @Autowired
-    private EmpresaRepository empresaRepository;
-
-    public boolean tieneCajaAbierta(Long cajeroId) {
-        return turnoCajaRepository.findByCajeroIdAndEstado(cajeroId, "ABIERTA").isPresent();
+    public CajaService(TurnoCajaRepository turnoCajaRepository, UsuarioRepository usuarioRepository) {
+        this.turnoCajaRepository = turnoCajaRepository;
+        this.usuarioRepository = usuarioRepository;
     }
 
-    // ✨ CORRECCIÓN: Solo recibe usuarioId y montoInicial
-    public void abrirCaja(Long usuarioId, BigDecimal montoInicial) {
-        if (tieneCajaAbierta(usuarioId)) {
-            throw new RuntimeException("El usuario ya tiene una caja abierta");
+    public boolean tieneCajaAbierta(AuthPrincipal p) {
+        return turnoCajaRepository.findByCajeroIdAndEstado(p.usuarioId(), "ABIERTA").isPresent();
+    }
+
+    @Transactional
+    public void abrirCaja(AuthPrincipal p, BigDecimal montoInicial) {
+        validarMonto(montoInicial, true, "El monto inicial");
+        if (tieneCajaAbierta(p)) {
+            throw new NegocioException("Ya tienes una caja abierta.");
         }
 
-        Usuario usuario = usuarioRepository.findById(usuarioId)
-            .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
-            
-        // 1. Obtener la empresa del usuario
-        Long empresaIdReal = usuario.getEmpresa().getId(); 
-        Empresa empresa = empresaRepository.findById(empresaIdReal)
-            .orElseThrow(() -> new RuntimeException("Empresa no encontrada"));
-
-        // ✨ 2. Obtener la sucursal del usuario (Asegúrate de que tu entidad Usuario tenga getSucursal())
+        Usuario usuario = usuarioRepository.findById(p.usuarioId())
+                .orElseThrow(() -> new NegocioException("Usuario no encontrado."));
+        if (usuario.getEmpresa() == null || !usuario.getEmpresa().getId().equals(p.empresaId())) {
+            throw new NegocioException("Sesión inconsistente. Vuelve a iniciar sesión.");
+        }
         if (usuario.getSucursal() == null) {
-            throw new RuntimeException("El usuario no tiene una sucursal asignada.");
+            throw new NegocioException("Tu usuario no tiene una sucursal asignada.");
         }
 
         TurnoCaja turno = new TurnoCaja();
-        turno.setCajeroId(usuarioId); 
-        turno.setEmpresa(empresa); 
-        
-        // ✨ 3. ASIGNAR LA SUCURSAL OBLIGATORIA
-        turno.setSucursal(usuario.getSucursal()); 
-        
+        turno.setCajeroId(p.usuarioId());
+        turno.setEmpresa(usuario.getEmpresa());
+        turno.setSucursal(usuario.getSucursal());
         turno.setFechaApertura(LocalDateTime.now());
-        turno.setMontoApertura(montoInicial); 
-        turno.setEstado("ABIERTA"); 
-
+        turno.setMontoApertura(montoInicial);
+        turno.setEstado("ABIERTA");
         turnoCajaRepository.save(turno);
     }
 
-    public void cerrarCaja(Long cajeroId, CierreCajaDTO cierreDTO) {
-        TurnoCaja turnoAbierto = turnoCajaRepository.findByCajeroIdAndEstado(cajeroId, "ABIERTA")
-                .orElseThrow(() -> new RuntimeException("No hay ninguna caja abierta para este usuario."));
+    /**
+     * Cierra el turno. El único dato que aporta el cajero es el efectivo contado (totalRealFisico);
+     * el total esperado y la diferencia los calcula el servidor con lo acumulado en el turno.
+     */
+    @Transactional
+    public void cerrarCaja(AuthPrincipal p, CierreCajaDTO cierre) {
+        validarMonto(cierre.getTotalRealFisico(), true, "El efectivo contado");
+        TurnoCaja turno = turnoAbierto(p, "No hay ninguna caja abierta para cerrar.");
 
-        turnoAbierto.setEstado("CERRADA");
-        turnoAbierto.setFechaCierre(LocalDateTime.now());
+        BigDecimal esperado = efectivoEsperado(turno);
 
-        // Guardado de la cuadratura y cierre
-        turnoAbierto.setTotalSistema(cierreDTO.getTotalSistema());
-        turnoAbierto.setTotalRealFisico(cierreDTO.getTotalRealFisico());
-        turnoAbierto.setDiferencia(cierreDTO.getDiferencia());
-
-        // Consolidación de los acumulados de operación de la jornada
-        if (cierreDTO.getVentasEfectivo() != null) turnoAbierto.setVentasEfectivo(cierreDTO.getVentasEfectivo());
-        if (cierreDTO.getVentasTarjeta() != null) turnoAbierto.setVentasTarjeta(cierreDTO.getVentasTarjeta());
-        if (cierreDTO.getIngresosExtra() != null) turnoAbierto.setIngresosExtra(cierreDTO.getIngresosExtra());
-        if (cierreDTO.getAbonosCredito() != null) turnoAbierto.setAbonosCredito(cierreDTO.getAbonosCredito()); // ✨ NUEVO
-        if (cierreDTO.getRetiros() != null) turnoAbierto.setRetiros(cierreDTO.getRetiros());
-
-        turnoCajaRepository.save(turnoAbierto);
+        turno.setEstado("CERRADA");
+        turno.setFechaCierre(LocalDateTime.now());
+        turno.setTotalSistema(esperado);
+        turno.setTotalRealFisico(cierre.getTotalRealFisico());
+        turno.setDiferencia(cierre.getTotalRealFisico().subtract(esperado));
+        turnoCajaRepository.save(turno);
     }
 
-    public void registrarMovimiento(Long cajeroId, MovimientoCajaDTO movimiento) {
-        TurnoCaja turnoAbierto = turnoCajaRepository.findByCajeroIdAndEstado(cajeroId, "ABIERTA")
-                .orElseThrow(() -> new RuntimeException("No hay ninguna caja abierta para registrar movimientos."));
-
-        BigDecimal monto = BigDecimal.valueOf(movimiento.getMonto());
-
-        if ("ingreso".equalsIgnoreCase(movimiento.getTipo())) {
-            BigDecimal actual = turnoAbierto.getIngresosExtra() != null ? turnoAbierto.getIngresosExtra() : BigDecimal.ZERO;
-            turnoAbierto.setIngresosExtra(actual.add(monto));
-        } else if ("retiro".equalsIgnoreCase(movimiento.getTipo())) {
-            BigDecimal actual = turnoAbierto.getRetiros() != null ? turnoAbierto.getRetiros() : BigDecimal.ZERO;
-            turnoAbierto.setRetiros(actual.add(monto));
-        } else {
-            throw new RuntimeException("Tipo de movimiento inválido. Debe ser 'ingreso' o 'retiro'.");
+    @Transactional
+    public void registrarMovimiento(AuthPrincipal p, MovimientoCajaDTO mov) {
+        if (mov.getMonto() == null || mov.getMonto() <= 0 || mov.getMonto().isNaN() || mov.getMonto().isInfinite()) {
+            throw new NegocioException("El monto debe ser mayor a cero.");
         }
+        TurnoCaja turno = turnoAbierto(p, "No hay ninguna caja abierta para registrar movimientos.");
+        BigDecimal monto = BigDecimal.valueOf(mov.getMonto());
+        validarMonto(monto, false, "El monto");
 
-        turnoCajaRepository.save(turnoAbierto);
+        if ("ingreso".equalsIgnoreCase(mov.getTipo())) {
+            turno.setIngresosExtra(nz(turno.getIngresosExtra()).add(monto));
+        } else if ("retiro".equalsIgnoreCase(mov.getTipo())) {
+            BigDecimal enCaja = efectivoEsperado(turno);
+            if (monto.compareTo(enCaja) > 0) {
+                throw new NegocioException("No puedes retirar más efectivo del que hay en caja.");
+            }
+            turno.setRetiros(nz(turno.getRetiros()).add(monto));
+        } else {
+            throw new NegocioException("Tipo de movimiento inválido. Debe ser 'ingreso' o 'retiro'.");
+        }
+        turnoCajaRepository.save(turno);
     }
 
-    // ✨ NUEVO MÉTODO: Registra el abono de dinero en la caja activa del cajero
-    public void registrarAbonoCredito(Long cajeroId, BigDecimal monto) {
-        TurnoCaja turnoAbierto = turnoCajaRepository.findByCajeroIdAndEstado(cajeroId, "ABIERTA")
-                .orElseThrow(() -> new RuntimeException("No hay ninguna caja abierta para registrar el abono."));
-
-        BigDecimal actual = turnoAbierto.getAbonosCredito() != null ? turnoAbierto.getAbonosCredito() : BigDecimal.ZERO;
-        turnoAbierto.setAbonosCredito(actual.add(monto));
-
-        turnoCajaRepository.save(turnoAbierto);
+    /**
+     * Registra un abono de cliente en el turno abierto. Efectivo: entra al cajón (abonosCredito).
+     * Tarjeta: no entra al cajón, se suma a ventasTarjeta.
+     */
+    @Transactional
+    public void registrarAbono(AuthPrincipal p, BigDecimal monto, String metodoPago) {
+        validarMonto(monto, false, "El monto del abono");
+        TurnoCaja turno = turnoAbierto(p, "Abre la caja antes de registrar abonos.");
+        if ("TARJETA".equalsIgnoreCase(metodoPago)) {
+            turno.setVentasTarjeta(nz(turno.getVentasTarjeta()).add(monto));
+        } else if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {
+            turno.setAbonosCredito(nz(turno.getAbonosCredito()).add(monto));
+        } else {
+            throw new NegocioException("Método de pago del abono no soportado: " + metodoPago);
+        }
+        turnoCajaRepository.save(turno);
     }
 
-    public java.util.List<TurnoCaja> obtenerHistorial(Long empresaId) {
-        return turnoCajaRepository.findByEmpresaIdOrderByIdDesc(empresaId);
+    @Transactional(readOnly = true)
+    public List<TurnoCaja> obtenerHistorial(AuthPrincipal p) {
+        return turnoCajaRepository.findByEmpresaIdOrderByIdDesc(p.empresaId());
     }
 
-    public ResumenCajaDTO obtenerResumen(Long cajeroId) {
-        TurnoCaja turnoAbierto = turnoCajaRepository.findByCajeroIdAndEstado(cajeroId, "ABIERTA")
-                .orElseThrow(() -> new RuntimeException("No hay ninguna caja abierta."));
-
-        BigDecimal fondo = turnoAbierto.getMontoApertura() != null ? turnoAbierto.getMontoApertura() : BigDecimal.ZERO;
-        BigDecimal vEfectivo = turnoAbierto.getVentasEfectivo() != null ? turnoAbierto.getVentasEfectivo() : BigDecimal.ZERO;
-        BigDecimal vTarjeta = turnoAbierto.getVentasTarjeta() != null ? turnoAbierto.getVentasTarjeta() : BigDecimal.ZERO;
-        BigDecimal vCredito = turnoAbierto.getVentasCredito() != null ? turnoAbierto.getVentasCredito() : BigDecimal.ZERO;
-        BigDecimal ingresos = turnoAbierto.getIngresosExtra() != null ? turnoAbierto.getIngresosExtra() : BigDecimal.ZERO;
-        
-        // ✨ NUEVO: Rescatar abonos acumulados de la caja
-        BigDecimal abonosCredito = turnoAbierto.getAbonosCredito() != null ? turnoAbierto.getAbonosCredito() : BigDecimal.ZERO;
-        BigDecimal retiros = turnoAbierto.getRetiros() != null ? turnoAbierto.getRetiros() : BigDecimal.ZERO;
-
-        // ✨ SE SUMA abonosCredito AL DINERO FÍSICO EN CAJA
-        BigDecimal totalEnCaja = fondo.add(vEfectivo).add(ingresos).add(abonosCredito).subtract(retiros);
-
-        // ✨ PASAMOS LOS 8 PARÁMETROS AL DTO
+    @Transactional(readOnly = true)
+    public ResumenCajaDTO obtenerResumen(AuthPrincipal p) {
+        TurnoCaja t = turnoAbierto(p, "No hay ninguna caja abierta.");
         return new ResumenCajaDTO(
-            fondo.doubleValue(),
-            vEfectivo.doubleValue(),
-            vTarjeta.doubleValue(),
-            vCredito.doubleValue(),
-            ingresos.doubleValue(),
-            abonosCredito.doubleValue(), // ✨ NUEVO EN EL DTO
-            retiros.doubleValue(),
-            totalEnCaja.doubleValue()
-        );
+                nz(t.getMontoApertura()).doubleValue(),
+                nz(t.getVentasEfectivo()).doubleValue(),
+                nz(t.getVentasTarjeta()).doubleValue(),
+                nz(t.getVentasCredito()).doubleValue(),
+                nz(t.getIngresosExtra()).doubleValue(),
+                nz(t.getAbonosCredito()).doubleValue(),
+                nz(t.getRetiros()).doubleValue(),
+                efectivoEsperado(t).doubleValue());
+    }
+
+    /** Efectivo físico que debería haber: fondo + ventas en efectivo + ingresos + abonos en efectivo − retiros. */
+    private BigDecimal efectivoEsperado(TurnoCaja t) {
+        return nz(t.getMontoApertura())
+                .add(nz(t.getVentasEfectivo()))
+                .add(nz(t.getIngresosExtra()))
+                .add(nz(t.getAbonosCredito()))
+                .subtract(nz(t.getRetiros()));
+    }
+
+    private TurnoCaja turnoAbierto(AuthPrincipal p, String mensaje) {
+        return turnoCajaRepository.findByCajeroIdAndEstado(p.usuarioId(), "ABIERTA")
+                .orElseThrow(() -> new NegocioException(mensaje));
+    }
+
+    private void validarMonto(BigDecimal monto, boolean permiteCero, String nombre) {
+        if (monto == null) {
+            throw new NegocioException(nombre + " es obligatorio.");
+        }
+        int cmp = monto.signum();
+        if (cmp < 0 || (cmp == 0 && !permiteCero) || monto.compareTo(MAX_MONTO) > 0) {
+            throw new NegocioException(nombre + " no es válido.");
+        }
+    }
+
+    private static BigDecimal nz(BigDecimal v) {
+        return v != null ? v : BigDecimal.ZERO;
     }
 }

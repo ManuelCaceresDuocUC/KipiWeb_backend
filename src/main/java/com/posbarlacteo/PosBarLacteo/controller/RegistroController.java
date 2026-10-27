@@ -1,6 +1,9 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
 import java.net.URI;
+import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,6 +19,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +36,11 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.posbarlacteo.PosBarLacteo.dto.RegistroEmpresaDTO;
+import com.posbarlacteo.PosBarLacteo.exception.ConflictoException;
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
+import com.posbarlacteo.PosBarLacteo.exception.ServicioExternoException;
+import com.posbarlacteo.PosBarLacteo.security.Roles;
+import com.posbarlacteo.PosBarLacteo.util.RutUtils;
 import com.posbarlacteo.PosBarLacteo.model.Empresa;
 import com.posbarlacteo.PosBarLacteo.model.Sucursal;
 import com.posbarlacteo.PosBarLacteo.model.Usuario;
@@ -65,13 +74,22 @@ public class RegistroController {
     @Value("${app.backend.url:http://localhost:8080}")
     private String backendUrl;
 
-    private static final String FLOW_BASE_URL = "https://sandbox.flow.cl/api";
+    @Value("${flow.base-url:https://sandbox.flow.cl/api}")
+    private String flowBaseUrl;
+
     private static final String PLAN_ID = "KIPI";
 
     private static final ParameterizedTypeReference<Map<String, Object>> MAP_TYPE =
             new ParameterizedTypeReference<>() {};
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate = crearRestTemplate();
+
+    private static RestTemplate crearRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));
+        factory.setReadTimeout(Duration.ofSeconds(20));
+        return new RestTemplate(factory);
+    }
 
     // ------------------------------------------------------------------
     // REGISTRO
@@ -79,108 +97,167 @@ public class RegistroController {
     @PostMapping("/registrar-empresa")
     @Transactional(rollbackFor = Exception.class)
     public ResponseEntity<?> registrarEmpresaCompleta(@RequestBody RegistroEmpresaDTO data) {
-        log.info("Registro recibido: correo={}, razonSocial={}, rut={}",
+        // Validar TODO antes de crear nada en Flow (evita clientes huérfanos)
+        validarRegistro(data);
+        String rutEmpresa = RutUtils.normalizar(data.getEmpresa().getRut_empresa());
+        log.info("Registro recibido: razonSocial={}, rut={}", data.getEmpresa().getRazon_social(), rutEmpresa);
+
+        // 1. Crear cliente en Flow
+        String customerId = crearClienteFlow(
                 data.getAdmin().getCorreo(),
                 data.getEmpresa().getRazon_social(),
-                data.getEmpresa().getRut_empresa());
+                rutEmpresa);
 
-        try {
-            // 1. Crear cliente en Flow
-            String customerId = crearClienteFlow(
-                    data.getAdmin().getCorreo(),
-                    data.getEmpresa().getRazon_social(),
-                    data.getEmpresa().getRut_empresa());
+        // 2. Obtener primera sucursal para la dirección principal de la empresa
+        RegistroEmpresaDTO.SucursalDTO primeraSucursal = (data.getSucursales() != null && !data.getSucursales().isEmpty())
+                ? data.getSucursales().get(0)
+                : null;
 
-            // 2. Obtener primera sucursal para la dirección principal de la empresa
-            RegistroEmpresaDTO.SucursalDTO primeraSucursal = (data.getSucursales() != null && !data.getSucursales().isEmpty())
-                    ? data.getSucursales().get(0)
-                    : null;
+        Empresa nuevaEmpresa = new Empresa();
+        nuevaEmpresa.setRazonSocial(data.getEmpresa().getRazon_social());
+        nuevaEmpresa.setRutEmpresa(rutEmpresa);
+        nuevaEmpresa.setGiro(data.getEmpresa().getGiro());
 
-            Empresa nuevaEmpresa = new Empresa();
-            nuevaEmpresa.setRazonSocial(data.getEmpresa().getRazon_social());
-            nuevaEmpresa.setRutEmpresa(data.getEmpresa().getRut_empresa());
-            nuevaEmpresa.setGiro(data.getEmpresa().getGiro());
+        if (primeraSucursal != null) {
+            nuevaEmpresa.setDireccion(primeraSucursal.getDireccion());
+            nuevaEmpresa.setComuna(primeraSucursal.getComuna());
+        }
 
-            if (primeraSucursal != null) {
-                nuevaEmpresa.setDireccion(primeraSucursal.getDireccion());
-                nuevaEmpresa.setComuna(primeraSucursal.getComuna());
-            }
+        nuevaEmpresa.setFlowCustomerId(customerId);
+        nuevaEmpresa.setEstado("PENDIENTE");
+        nuevaEmpresa.setActivo(false);
+        empresaRepository.save(nuevaEmpresa);
 
-            nuevaEmpresa.setFlowCustomerId(customerId);
-            nuevaEmpresa.setEstado("PENDIENTE");
-            nuevaEmpresa.setActivo(false);
-            empresaRepository.save(nuevaEmpresa);
+        // ✨ 2.5 CREAR TODAS LAS SUCURSALES REGISTRADAS ✨
+        Map<String, Sucursal> sucursalesGuardadas = new HashMap<>();
+        Sucursal sucursalMatriz = null;
 
-            // ✨ 2.5 CREAR TODAS LAS SUCURSALES REGISTRADAS ✨
-            Map<String, Sucursal> sucursalesGuardadas = new HashMap<>();
-            Sucursal sucursalMatriz = null;
+        if (data.getSucursales() != null && !data.getSucursales().isEmpty()) {
+            for (int i = 0; i < data.getSucursales().size(); i++) {
+                RegistroEmpresaDTO.SucursalDTO sucDto = data.getSucursales().get(i);
 
-            if (data.getSucursales() != null && !data.getSucursales().isEmpty()) {
-                for (int i = 0; i < data.getSucursales().size(); i++) {
-                    RegistroEmpresaDTO.SucursalDTO sucDto = data.getSucursales().get(i);
+                Sucursal sucursal = new Sucursal();
+                sucursal.setNombre(sucDto.getNombre());
+                sucursal.setDireccion(sucDto.getDireccion());
+                sucursal.setComuna(sucDto.getComuna());
+                sucursal.setEsCasaMatriz(i == 0); // La primera sucursal ingresada es Casa Matriz
+                sucursal.setEmpresa(nuevaEmpresa);
+                sucursal.setActivo(true);
 
-                    Sucursal sucursal = new Sucursal();
-                    sucursal.setNombre(sucDto.getNombre());
-                    sucursal.setDireccion(sucDto.getDireccion());
-                    sucursal.setComuna(sucDto.getComuna());
-                    sucursal.setEsCasaMatriz(i == 0); // La primera sucursal ingresada es Casa Matriz
-                    sucursal.setEmpresa(nuevaEmpresa);
-                    sucursal.setActivo(true);
+                Sucursal guardada = sucursalRepository.save(sucursal);
+                sucursalesGuardadas.put(guardada.getNombre(), guardada);
 
-                    Sucursal guardada = sucursalRepository.save(sucursal);
-                    sucursalesGuardadas.put(guardada.getNombre(), guardada);
-
-                    if (i == 0) {
-                        sucursalMatriz = guardada;
-                    }
+                if (i == 0) {
+                    sucursalMatriz = guardada;
                 }
             }
+        }
 
-            // 3. Usuario administrador (asociado a la Casa Matriz)
-            Usuario nuevoAdmin = new Usuario();
-            nuevoAdmin.setUsuario(data.getAdmin().getUsuario());
-            nuevoAdmin.setContrasena(passwordEncoder.encode(data.getAdmin().getContrasena()));
-            nuevoAdmin.setCorreo(data.getAdmin().getCorreo());
-            nuevoAdmin.setRol(data.getAdmin().getRol() != null ? data.getAdmin().getRol() : "admin");
-            nuevoAdmin.setEmpresa(nuevaEmpresa);
-            nuevoAdmin.setSucursal(sucursalMatriz);
-            usuarioRepository.save(nuevoAdmin);
+        // 3. Usuario administrador (asociado a la Casa Matriz)
+        Usuario nuevoAdmin = new Usuario();
+        nuevoAdmin.setUsuario(data.getAdmin().getUsuario().trim());
+        nuevoAdmin.setContrasena(passwordEncoder.encode(data.getAdmin().getContrasena()));
+        nuevoAdmin.setCorreo(data.getAdmin().getCorreo());
+        nuevoAdmin.setRol(Roles.ADMIN); // el primer usuario siempre es administrador
+        nuevoAdmin.setEmpresa(nuevaEmpresa);
+        nuevoAdmin.setSucursal(sucursalMatriz);
+        usuarioRepository.save(nuevoAdmin);
 
-            // ✨ 3.5 Empleados adicionales asignados dinámicamente a sus sucursales ✨
-            if (data.getEmpleados() != null && !data.getEmpleados().isEmpty()) {
-                for (RegistroEmpresaDTO.UsuarioDTO empData : data.getEmpleados()) {
-                    Usuario nuevoEmpleado = new Usuario();
-                    nuevoEmpleado.setUsuario(empData.getUsuario());
-                    nuevoEmpleado.setContrasena(passwordEncoder.encode(empData.getContrasena()));
-                    nuevoEmpleado.setCorreo(empData.getUsuario() + "@" + data.getEmpresa().getRut_empresa() + ".local");
-                    nuevoEmpleado.setRol(empData.getRol() != null ? empData.getRol() : "vendedor");
-                    nuevoEmpleado.setEmpresa(nuevaEmpresa);
+        // ✨ 3.5 Empleados adicionales asignados dinámicamente a sus sucursales ✨
+        if (data.getEmpleados() != null && !data.getEmpleados().isEmpty()) {
+            for (RegistroEmpresaDTO.UsuarioDTO empData : data.getEmpleados()) {
+                Usuario nuevoEmpleado = new Usuario();
+                nuevoEmpleado.setUsuario(empData.getUsuario().trim());
+                nuevoEmpleado.setContrasena(passwordEncoder.encode(empData.getContrasena()));
+                nuevoEmpleado.setCorreo(empData.getUsuario().trim() + "@" + rutEmpresa + ".local");
+                nuevoEmpleado.setRol(Roles.normalizar(empData.getRol()));
+                nuevoEmpleado.setEmpresa(nuevaEmpresa);
 
-                    // Buscar sucursal por el nombre recibido desde el frontend
-                    Sucursal sucursalAsignada = null;
-                    if (empData.getSucursalNombre() != null) {
-                        sucursalAsignada = sucursalesGuardadas.get(empData.getSucursalNombre());
-                    }
-                    if (sucursalAsignada == null) {
-                        sucursalAsignada = sucursalMatriz; // Fallback
-                    }
+                // Buscar sucursal por el nombre recibido desde el frontend
+                Sucursal sucursalAsignada = null;
+                if (empData.getSucursalNombre() != null) {
+                    sucursalAsignada = sucursalesGuardadas.get(empData.getSucursalNombre());
+                }
+                if (sucursalAsignada == null) {
+                    sucursalAsignada = sucursalMatriz; // Fallback
+                }
 
-                    nuevoEmpleado.setSucursal(sucursalAsignada);
-                    usuarioRepository.save(nuevoEmpleado);
+                nuevoEmpleado.setSucursal(sucursalAsignada);
+                usuarioRepository.save(nuevoEmpleado);
+            }
+        }
+
+        // 4. URL de registro de tarjeta Flow
+        String urlReturn = backendUrl + "/api/auth/registro-exitoso";
+        String urlRegistroTarjeta = generarEnlaceRegistroTarjeta(customerId, urlReturn);
+
+        Map<String, String> response = new HashMap<>();
+        response.put("url_pago", urlRegistroTarjeta);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+
+    // ------------------------------------------------------------------
+    // VALIDACIÓN DE REGISTRO
+    // ------------------------------------------------------------------
+    private void validarRegistro(RegistroEmpresaDTO data) {
+        if (data == null || data.getEmpresa() == null || data.getAdmin() == null) {
+            throw new NegocioException("Faltan datos de la empresa o del administrador.");
+        }
+        var emp = data.getEmpresa();
+        var admin = data.getAdmin();
+
+        if (emp.getRazon_social() == null || emp.getRazon_social().isBlank()) {
+            throw new NegocioException("La razón social es obligatoria.");
+        }
+        if (!RutUtils.esValido(emp.getRut_empresa())) {
+            throw new NegocioException("El RUT de la empresa no es válido.");
+        }
+        String rut = RutUtils.normalizar(emp.getRut_empresa());
+        if (empresaRepository.findByRutEmpresa(rut).isPresent()) {
+            throw new ConflictoException("Ya existe una empresa registrada con ese RUT. Si no terminaste el pago, contáctanos.");
+        }
+        if (admin.getCorreo() == null || !admin.getCorreo().matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+            throw new NegocioException("El correo del administrador no es válido.");
+        }
+        validarCredenciales(admin.getUsuario(), admin.getContrasena());
+
+        if (data.getSucursales() == null || data.getSucursales().isEmpty()) {
+            throw new NegocioException("Debes registrar al menos una sucursal.");
+        }
+        Set<String> sucursales = new HashSet<>();
+        for (var suc : data.getSucursales()) {
+            if (suc.getNombre() == null || suc.getNombre().isBlank()) {
+                throw new NegocioException("Todas las sucursales deben tener nombre.");
+            }
+            if (!sucursales.add(suc.getNombre())) {
+                throw new NegocioException("Hay sucursales con el mismo nombre: " + suc.getNombre());
+            }
+        }
+
+        // Nombres de usuario únicos globalmente (evita ambigüedad de login entre empresas)
+        Set<String> usuarios = new HashSet<>();
+        usuarios.add(admin.getUsuario().trim().toLowerCase());
+        if (usuarioRepository.existsByUsuario(admin.getUsuario().trim())) {
+            throw new ConflictoException("El nombre de usuario \"" + admin.getUsuario().trim() + "\" ya está en uso.");
+        }
+        if (data.getEmpleados() != null) {
+            for (var e : data.getEmpleados()) {
+                validarCredenciales(e.getUsuario(), e.getContrasena());
+                String nombre = e.getUsuario().trim();
+                if (!usuarios.add(nombre.toLowerCase()) || usuarioRepository.existsByUsuario(nombre)) {
+                    throw new ConflictoException("El nombre de usuario \"" + nombre + "\" ya está en uso.");
                 }
             }
+        }
+    }
 
-            // 4. URL de registro de tarjeta Flow
-            String urlReturn = backendUrl + "/api/auth/registro-exitoso";
-            String urlRegistroTarjeta = generarEnlaceRegistroTarjeta(customerId, urlReturn);
-
-            Map<String, String> response = new HashMap<>();
-            response.put("url_pago", urlRegistroTarjeta);
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-
-        } catch (Exception e) {
-            log.error("Error en proceso de registro: ", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
+    private void validarCredenciales(String usuario, String contrasena) {
+        if (usuario == null || usuario.trim().length() < 3) {
+            throw new NegocioException("El nombre de usuario debe tener al menos 3 caracteres.");
+        }
+        if (contrasena == null || contrasena.length() < 8) {
+            throw new NegocioException("La contraseña debe tener al menos 8 caracteres.");
         }
     }
 
@@ -200,6 +277,13 @@ public class RegistroController {
             }
 
             String customerId = (String) estadoRegistro.get("customerId");
+
+            Empresa yaRegistrada = empresaRepository.findByFlowCustomerId(customerId).orElse(null);
+            if (yaRegistrada != null && "ACTIVA".equals(yaRegistrada.getEstado())
+                    && yaRegistrada.getFlowSubscriptionId() != null) {
+                // Recarga del retorno de Flow: no se crea una segunda suscripción
+                return redirigir("success");
+            }
 
             Map<String, Object> suscripcion = suscribirClienteAlPlan(customerId, PLAN_ID);
             String statusStr = String.valueOf(suscripcion.get("status"));
@@ -251,7 +335,7 @@ public class RegistroController {
         if (responseMap != null && responseMap.containsKey("customerId")) {
             return String.valueOf(responseMap.get("customerId"));
         }
-        throw new RuntimeException("Error al crear cliente en Flow: " + responseMap);
+        throw new ServicioExternoException("No se pudo crear tu cuenta de pagos. Inténtalo más tarde.");
     }
 
     private String generarEnlaceRegistroTarjeta(String customerId, String urlReturn) {
@@ -264,7 +348,7 @@ public class RegistroController {
         if (responseMap != null && responseMap.containsKey("url") && responseMap.containsKey("token")) {
             return responseMap.get("url") + "?token=" + responseMap.get("token");
         }
-        throw new RuntimeException("Error al generar enlace de registro: " + responseMap);
+        throw new ServicioExternoException("No se pudo generar el enlace de pago. Inténtalo más tarde.");
     }
 
     private Map<String, Object> suscribirClienteAlPlan(String customerId, String planId) {
@@ -301,11 +385,14 @@ public class RegistroController {
 
         try {
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    FLOW_BASE_URL + endpoint, HttpMethod.POST, new HttpEntity<>(body, headers), MAP_TYPE);
+                    flowBaseUrl + endpoint, HttpMethod.POST, new HttpEntity<>(body, headers), MAP_TYPE);
             return response.getBody();
         } catch (HttpStatusCodeException e) {
             log.error("Flow POST {} -> {} | body: [{}]", endpoint, e.getStatusCode(), e.getResponseBodyAsString());
-            throw new RuntimeException("Rechazo de Flow (" + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+            throw new ServicioExternoException("El sistema de pagos rechazó la solicitud. Revisa los datos e inténtalo nuevamente.");
+        } catch (org.springframework.web.client.RestClientException e) {
+            log.error("Flow {} no disponible: {}", endpoint, e.getMessage());
+            throw new ServicioExternoException("No se pudo conectar con el sistema de pagos. Inténtalo más tarde.");
         }
     }
 
@@ -313,7 +400,7 @@ public class RegistroController {
         params.put("apiKey", flowApiKey.trim());
         params.put("s", firmar(params));
 
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(FLOW_BASE_URL + endpoint);
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(flowBaseUrl + endpoint);
         params.forEach(builder::queryParam);
         URI uri = builder.build().encode().toUri();
 
@@ -323,7 +410,10 @@ public class RegistroController {
             return response.getBody();
         } catch (HttpStatusCodeException e) {
             log.error("Flow GET {} -> {} | body: [{}]", endpoint, e.getStatusCode(), e.getResponseBodyAsString());
-            throw new RuntimeException("Rechazo de Flow GET (" + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+            throw new ServicioExternoException("No se pudo consultar el sistema de pagos. Inténtalo más tarde.");
+        } catch (org.springframework.web.client.RestClientException e) {
+            log.error("Flow {} no disponible: {}", endpoint, e.getMessage());
+            throw new ServicioExternoException("No se pudo conectar con el sistema de pagos. Inténtalo más tarde.");
         }
     }
 

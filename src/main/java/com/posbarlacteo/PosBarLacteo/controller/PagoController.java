@@ -2,33 +2,27 @@ package com.posbarlacteo.PosBarLacteo.controller;
 
 import java.util.Map;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.posbarlacteo.PosBarLacteo.dto.AbonoRequest;
 import com.posbarlacteo.PosBarLacteo.dto.PagoRequest;
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.model.Venta;
-import com.posbarlacteo.PosBarLacteo.service.DteService; // Nuevo servicio orquestador
+import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
+import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.DteService;
 import com.posbarlacteo.PosBarLacteo.service.VentaService;
 
+/** Los errores de negocio los traduce GlobalExceptionHandler a {"message": "..."} con el código HTTP correcto. */
 @RestController
-@CrossOrigin(origins = {
-    "http://posbarlacteo-manuel-2026.s3-website-us-east-1.amazonaws.com",
-    "http://localhost:5173",
-    "http://34.203.91.138",
-    "https://ordpos.duckdns.org",
-    "http://192.168.100.85:5173"
-})
 @RequestMapping("/api/pagos")
 public class PagoController {
 
     private final VentaService ventaService;
-    private final DteService dteService; // Inyección de DteService
+    private final DteService dteService;
 
     public PagoController(VentaService ventaService, DteService dteService) {
         this.ventaService = ventaService;
@@ -37,120 +31,37 @@ public class PagoController {
 
     @PostMapping("/efectivo")
     public ResponseEntity<?> procesarEfectivo(@RequestBody PagoRequest request) {
-        try {
-            Venta venta = ventaService.procesarVentaCompleta(
-                request.getItems(), 
-                (double) request.getMonto(), 
-                "EFECTIVO", 
-                request.getUsuarioId(),
-                request.getEmpresaId(),
-                request.getClienteId()
-            );
-
-            // Genera DTE Oficial o Voucher Local según la configuración de la empresa
-            String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, "EFECTIVO");
-
-            return ResponseEntity.ok(Map.of(
-                "status", "success", 
-                "message", "Venta en efectivo registrada correctamente",
-                "ventaId", venta.getId(),
-                "boletaPdf", base64Pdf
-            ));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", e.getMessage()));
-        }
+        return cobrar(request, "EFECTIVO", "Venta en efectivo registrada correctamente");
     }
 
     @PostMapping("/cobrar")
     public ResponseEntity<?> procesarPagoTarjeta(@RequestBody PagoRequest request) {
-        try {
-            if (request.getItems() == null || request.getItems().isEmpty()) {
-                throw new Exception("El carrito está vacío");
-            }
-            
-            Venta venta = ventaService.procesarVentaCompleta(
-                request.getItems(), 
-                (double) request.getMonto(), 
-                "TARJETA", 
-                request.getUsuarioId(),
-                request.getEmpresaId(),
-                request.getClienteId()
-            );
-            
-            // Evalúa si emite DTE para tarjeta o genera voucher informativo
-            String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, "TARJETA");
-            
-            return ResponseEntity.ok(Map.of(
-                "status", "success", 
-                "message", "Venta con tarjeta registrada correctamente",
-                "ventaId", venta.getId(),
-                "boletaPdf", base64Pdf
-            ));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", e.getMessage()));
-        }
+        return cobrar(request, "TARJETA", "Venta con tarjeta registrada correctamente");
     }
 
     @PostMapping("/credito")
     public ResponseEntity<?> procesarCredito(@RequestBody PagoRequest request) {
-        try {
-            if (request.getClienteId() == null) {
-                throw new Exception("El ID del cliente es obligatorio para ventas a crédito");
-            }
-            
-            Venta venta = ventaService.procesarVentaCompleta(
-                request.getItems(), 
-                (double) request.getMonto(), 
-                "CREDITO", 
-                request.getUsuarioId(),
-                request.getEmpresaId(),
-                request.getClienteId() 
-            );
-
-            String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, "CREDITO");
-
-            return ResponseEntity.ok(Map.of(
-                "status", "success", 
-                "message", "Venta a crédito registrada exitosamente.",
-                "ventaId", venta.getId(),
-                "boletaPdf", base64Pdf
-            ));
-
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", e.getMessage()));
+        if (request.getClienteId() == null) {
+            throw new NegocioException("El cliente es obligatorio para ventas a crédito.");
         }
+        return cobrar(request, "CREDITO", "Venta a crédito registrada exitosamente.");
     }
 
-    @PostMapping("/abono")
-    public ResponseEntity<?> procesarAbono(@RequestBody AbonoRequest request) {
-        try {
-            if (request.getClienteId() == null || request.getMonto() == null || request.getMonto() <= 0) {
-                throw new Exception("El cliente y un monto válido son obligatorios para registrar un abono.");
-            }
+    private ResponseEntity<?> cobrar(PagoRequest request, String metodo, String mensaje) {
+        AuthPrincipal p = SecurityUtils.actual();
+        // Identidad siempre desde el token: lo que venga en el cuerpo se pisa
+        request.setEmpresaId(p.empresaId());
+        request.setUsuarioId(p.usuarioId());
 
-            Map<String, Object> datosAbono = ventaService.procesarAbonoCliente(
-                request.getClienteId(),
-                request.getMonto(),
-                request.getMetodoPago(),
-                request.getUsuarioId(),
-                request.getEmpresaId()
-            );
+        Venta venta = ventaService.procesarVentaCompleta(
+                request.getItems(), request.getMonto(), metodo, p, request.getClienteId());
 
-            String rutaPdf = (String) datosAbono.getOrDefault("comprobantePdf", "Guardado en disco local");
+        String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, metodo);
 
-            return ResponseEntity.ok(Map.of(
+        return ResponseEntity.ok(Map.of(
                 "status", "success",
-                "message", "Abono registrado e impreso exitosamente.",
-                "datos", datosAbono,
-                "rutaArchivo", rutaPdf
-            ));
-
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", e.getMessage()));
-        }
+                "message", mensaje,
+                "ventaId", venta.getId(),
+                "boletaPdf", base64Pdf == null ? "" : base64Pdf));
     }
 }

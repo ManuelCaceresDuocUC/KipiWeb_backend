@@ -7,4 +7,6 @@ import com.posbarlacteo.PosBarLacteo.model.Sucursal;
 
 @Repository
 public interface SucursalRepository extends JpaRepository<Sucursal, Long> {
+
+    java.util.Optional<Sucursal> findByIdAndEmpresaId(Long id, Long empresaId);
 }

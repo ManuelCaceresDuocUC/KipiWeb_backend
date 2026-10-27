@@ -13,7 +13,9 @@ public interface ClienteRepository extends JpaRepository<Cliente, Long> {
 
     List<Cliente> findByEmpresaId(Long empresaId);
 
-    Optional<Cliente> findByRut(String rut);
+    Optional<Cliente> findByIdAndEmpresaId(Long id, Long empresaId);
+
+    Optional<Cliente> findByRutAndEmpresaId(String rut, Long empresaId);
 
     // ✨ CORREGIDO: c.empresaId cambiado a c.empresa.id para coincidir con el campo de la entidad
     @Query("SELECT c FROM Cliente c WHERE c.empresa.id = :empresaId AND " +

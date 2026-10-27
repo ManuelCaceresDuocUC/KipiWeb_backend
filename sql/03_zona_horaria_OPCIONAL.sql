@@ -1,0 +1,12 @@
+-- ETAPA 1 · OPCIONAL: corregir fechas históricas guardadas en UTC.
+-- Hasta ahora Render corría en UTC, así que las fechas existentes están en hora UTC.
+-- Desde esta versión la app trabaja en America/Santiago (APP_TIMEZONE).
+-- Esto SOLO importa para reportes del día/mes de datos antiguos. Si son datos de prueba, ignóralo.
+--
+-- !! HAZ RESPALDO ANTES. Ejecútalo UNA sola vez, justo antes o después de desplegar, nunca dos veces. !!
+-- (Requiere tablas de zona horaria cargadas en MySQL; en Railway normalmente lo están.)
+--
+-- UPDATE pos_ventas   SET fecha_hora      = CONVERT_TZ(fecha_hora,      'UTC', 'America/Santiago');
+-- UPDATE turnos_caja  SET fecha_apertura  = CONVERT_TZ(fecha_apertura,  'UTC', 'America/Santiago'),
+--                         fecha_cierre    = CONVERT_TZ(fecha_cierre,    'UTC', 'America/Santiago');
+-- UPDATE notas        SET fecha_hora      = CONVERT_TZ(fecha_hora,      'UTC', 'America/Santiago');

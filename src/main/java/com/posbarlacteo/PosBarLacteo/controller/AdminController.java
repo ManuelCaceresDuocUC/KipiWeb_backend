@@ -8,62 +8,27 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.posbarlacteo.PosBarLacteo.model.Nota;
-import com.posbarlacteo.PosBarLacteo.repository.NotaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
 import com.posbarlacteo.PosBarLacteo.repository.VentaRepository;
+import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 
 @RestController
 @RequestMapping("/api/admin")
-@CrossOrigin(origins = {
-    "http://posbarlacteo-manuel-2026.s3-website-us-east-1.amazonaws.com", 
-    "http://localhost:5173",
-    "http://34.203.91.138",
-    "https://ordpos.duckdns.org",                                             
-    "http://192.168.100.85:5173"                                         
-})
 public class AdminController {
 
-    @Autowired
-    private NotaRepository notaRepository;
+    private final VentaRepository ventaRepository;
+    private final ProductoRepository productoRepository;
 
-    @Autowired
-    private VentaRepository ventaRepository;
-
-    @Autowired
-    private ProductoRepository productoRepository;
-
-    // ==========================================
-    // 📌 ENDPOINTS PARA EL BLOC DE NOTAS
-    // ==========================================
-
-    @GetMapping("/notas")
-    public List<Nota> obtenerNotas() {
-        return notaRepository.findAllByOrderByFechaHoraDesc();
-    }
-
-    @PostMapping("/notas")
-    public Nota crearNota(@RequestBody Nota nota) {
-        return notaRepository.save(nota);
-    }
-
-    @DeleteMapping("/notas/{id}")
-    public ResponseEntity<?> eliminarNota(@PathVariable Long id) {
-        notaRepository.deleteById(id);
-        return ResponseEntity.ok(Map.of("mensaje", "Nota eliminada"));
+    public AdminController(VentaRepository ventaRepository, ProductoRepository productoRepository) {
+        this.ventaRepository = ventaRepository;
+        this.productoRepository = productoRepository;
     }
 
     // ==========================================
@@ -71,7 +36,8 @@ public class AdminController {
     // ==========================================
 
     @GetMapping("/metricas")
-    public ResponseEntity<Map<String, Object>> obtenerMetricas(@RequestParam(defaultValue = "1") Long empresaId) {
+    public ResponseEntity<Map<String, Object>> obtenerMetricas() {
+        Long empresaId = SecurityUtils.actual().empresaId();
         Map<String, Object> metricas = new HashMap<>();
 
         // 🕒 Configuración de tiempos reales dinámicos
@@ -106,9 +72,9 @@ public class AdminController {
 
     @GetMapping("/productos-mas-vendidos")
     public ResponseEntity<List<Map<String, Object>>> obtenerMasVendidos(
-            @RequestParam(defaultValue = "dia") String periodo,
-            @RequestParam(defaultValue = "1") Long empresaId) { 
-        
+            @RequestParam(defaultValue = "dia") String periodo) {
+        Long empresaId = SecurityUtils.actual().empresaId();
+
         LocalDateTime desde;
         LocalDate hoy = LocalDate.now();
 

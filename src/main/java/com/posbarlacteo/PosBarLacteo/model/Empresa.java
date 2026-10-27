@@ -2,6 +2,9 @@ package com.posbarlacteo.PosBarLacteo.model;
 
 import java.time.LocalDateTime;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -11,6 +14,7 @@ import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "empresas")
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Empresa {
 
     @Id
@@ -33,9 +37,12 @@ public class Empresa {
     @Column(length = 100)
     private String comuna;
 
+    // LEGADO: la API Key vigente vive en configuracion_dte. Nunca se serializa.
+    @JsonIgnore
     @Column(name = "haulmer_api_key", length = 500)
     private String haulmerApiKey;
 
+    @JsonIgnore
     @Column(name = "getnet_client_id")
     private String getnetClientId;
 
@@ -43,6 +50,7 @@ public class Empresa {
     private Boolean activo = false;
     
     // ✨ NUEVOS CAMPOS PARA FLOW ✨
+    @JsonIgnore
     @Column(name = "flow_customer_id")
     private String flowCustomerId;
 
@@ -52,6 +60,7 @@ public class Empresa {
     @Column(name = "fecha_registro", updatable = false, insertable = false)
     private LocalDateTime fechaRegistro;
 
+    @JsonIgnore
     @Column(name = "flow_subscription_id")
     private String flowSubscriptionId;
 

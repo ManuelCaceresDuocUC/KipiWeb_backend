@@ -2,15 +2,17 @@ package com.posbarlacteo.PosBarLacteo.service;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import com.posbarlacteo.PosBarLacteo.exception.ConflictoException;
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
+import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
 import com.posbarlacteo.PosBarLacteo.model.Cliente;
-import com.posbarlacteo.PosBarLacteo.model.Empresa; 
 import com.posbarlacteo.PosBarLacteo.model.ItemVenta;
 import com.posbarlacteo.PosBarLacteo.model.Producto;
 import com.posbarlacteo.PosBarLacteo.model.Receta;
@@ -19,90 +21,95 @@ import com.posbarlacteo.PosBarLacteo.model.Usuario;
 import com.posbarlacteo.PosBarLacteo.model.Venta;
 import com.posbarlacteo.PosBarLacteo.model.VentaDetalle;
 import com.posbarlacteo.PosBarLacteo.repository.ClienteRepository;
-import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository; 
 import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
 import com.posbarlacteo.PosBarLacteo.repository.RecetaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.TurnoCajaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.UsuarioRepository;
 import com.posbarlacteo.PosBarLacteo.repository.VentaRepository;
-
-import jakarta.transaction.Transactional;
+import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 
 @Service
 public class VentaService {
 
-    @Autowired
-    private ProductoRepository productoRepository;
+    private static final Logger log = LoggerFactory.getLogger(VentaService.class);
 
-    @Autowired
-    private RecetaRepository recetaRepository;
+    private final ProductoRepository productoRepository;
+    private final RecetaRepository recetaRepository;
+    private final VentaRepository ventaRepository;
+    private final TurnoCajaRepository turnoCajaRepository;
+    private final UsuarioRepository usuarioRepository;
+    private final ClienteRepository clienteRepository;
+    private final ValeCreditoPdfService valeCreditoPdfService;
 
-    @Autowired
-    private VentaRepository ventaRepository;
+    public VentaService(ProductoRepository productoRepository, RecetaRepository recetaRepository,
+                        VentaRepository ventaRepository, TurnoCajaRepository turnoCajaRepository,
+                        UsuarioRepository usuarioRepository, ClienteRepository clienteRepository,
+                        ValeCreditoPdfService valeCreditoPdfService) {
+        this.productoRepository = productoRepository;
+        this.recetaRepository = recetaRepository;
+        this.ventaRepository = ventaRepository;
+        this.turnoCajaRepository = turnoCajaRepository;
+        this.usuarioRepository = usuarioRepository;
+        this.clienteRepository = clienteRepository;
+        this.valeCreditoPdfService = valeCreditoPdfService;
+    }
 
-    @Autowired
-    private TurnoCajaRepository turnoCajaRepository;
-
-    @Autowired
-    private UsuarioRepository usuarioRepository;
-
-    @Autowired
-    private EmpresaRepository empresaRepository;
-
-    @Autowired
-    private ClienteRepository clienteRepository;
-
-    @Autowired
-    private ValeCreditoPdfService valeCreditoPdfService;
-    
-
+    /**
+     * Registra la venta completa. Empresa, cajero y sucursal salen SIEMPRE del token.
+     * El total se calcula en el servidor; si el monto informado por el cliente no coincide, se rechaza.
+     */
     @Transactional
-    public Venta procesarVentaCompleta(List<ItemVenta> items, Double montoTotal, String metodoPago, Long usuarioId, Long empresaId, Long clienteId) {
-        
+    public Venta procesarVentaCompleta(List<ItemVenta> items, long montoEsperado, String metodoPago,
+                                       AuthPrincipal p, Long clienteId) {
+        if (items == null || items.isEmpty()) {
+            throw new NegocioException("El carrito está vacío.");
+        }
+
+        Usuario usuario = usuarioRepository.findById(p.usuarioId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Usuario no encontrado."));
+        if (usuario.getEmpresa() == null || !usuario.getEmpresa().getId().equals(p.empresaId())) {
+            throw new NegocioException("Sesión inconsistente. Vuelve a iniciar sesión.");
+        }
+        if (usuario.getSucursal() == null) {
+            throw new NegocioException("Tu usuario no tiene una sucursal asignada.");
+        }
+
+        // Primero la caja: así no se toca stock ni nada si el turno no está abierto
+        TurnoCaja turno = turnoCajaRepository.findByCajeroIdAndEstado(p.usuarioId(), "ABIERTA")
+                .orElseThrow(() -> new NegocioException(
+                        "No hay un turno de caja abierto. Abre la caja antes de vender."));
+
         Venta venta = new Venta();
-        venta.setTotal(montoTotal);
         venta.setMetodoPago(metodoPago);
+        venta.setEmpresa(usuario.getEmpresa());
+        venta.setUsuario(usuario);
+        venta.setSucursal(usuario.getSucursal());
 
-        if (empresaId != null) {
-            Empresa empresa = empresaRepository.findById(empresaId)
-                .orElseThrow(() -> new RuntimeException("Empresa no encontrada con el ID: " + empresaId));
-            venta.setEmpresa(empresa);
-        } else {
-            throw new RuntimeException("El ID de la empresa es obligatorio para registrar la venta");
-        }
-
-        if (usuarioId != null) {
-            Usuario usuario = usuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new RuntimeException("Usuario cajero no encontrado"));
-            venta.setUsuario(usuario);
-
-            // ✨ SOLUCIÓN AL ERROR: Asignar la sucursal del usuario a la venta
-            if (usuario.getSucursal() == null) {
-                throw new RuntimeException("El usuario cajero no tiene una sucursal asignada.");
-            }
-            venta.setSucursal(usuario.getSucursal()); 
-
-        } else {
-            throw new RuntimeException("El ID del cajero es obligatorio para registrar la venta");
-        }
-        
         List<VentaDetalle> detalles = new ArrayList<>();
+        double total = 0.0;
 
         for (ItemVenta item : items) {
-            Producto producto = productoRepository.findById(item.getProductoId())
-                .orElseThrow(() -> new RuntimeException("Producto no encontrado: " + item.getProductoId()));
+            if (item == null || item.getProductoId() == null || item.getCantidad() == null
+                    || item.getCantidad() <= 0 || Double.isNaN(item.getCantidad())) {
+                throw new NegocioException("Hay un producto con cantidad inválida en el carrito.");
+            }
+            Producto producto = productoRepository.findByIdAndEmpresaId(item.getProductoId(), p.empresaId())
+                    .orElseThrow(() -> new NegocioException("Producto no encontrado: " + item.getProductoId()));
+            if (!Boolean.TRUE.equals(producto.getActivo())) {
+                throw new NegocioException("El producto \"" + producto.getDescripcion() + "\" está desactivado.");
+            }
+            if (Boolean.TRUE.equals(producto.getEsInsumo())) {
+                throw new NegocioException("\"" + producto.getDescripcion() + "\" es un insumo y no se vende directamente.");
+            }
 
             List<Receta> ingredientes = recetaRepository.findByProductoPrincipalId(producto.getId());
-
             if (ingredientes.isEmpty()) {
                 producto.setStock(producto.getStock() - item.getCantidad());
                 productoRepository.save(producto);
             } else {
                 for (Receta receta : ingredientes) {
                     Producto insumo = receta.getInsumo();
-                    Double gastoTotal = receta.getCantidadUsada() * item.getCantidad();
-
-                    insumo.setStock(insumo.getStock() - gastoTotal);
+                    insumo.setStock(insumo.getStock() - receta.getCantidadUsada() * item.getCantidad());
                     productoRepository.save(insumo);
                 }
             }
@@ -113,121 +120,54 @@ public class VentaService {
             detalle.setPrecioUnitario(producto.getPrecio());
             detalle.setVenta(venta);
             detalles.add(detalle);
+            total += producto.getPrecio() * item.getCantidad();
         }
-        
+
+        long totalServidor = Math.round(total);
+        if (totalServidor != montoEsperado) {
+            throw new ConflictoException("El total cambió (" + totalServidor + " vs " + montoEsperado
+                    + "). Actualiza los precios del carrito e inténtalo de nuevo.");
+        }
+        venta.setTotal((double) totalServidor);
+
         if (clienteId != null) {
-            Cliente cliente = clienteRepository.findById(clienteId)
-                .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+            Cliente cliente = clienteRepository.findByIdAndEmpresaId(clienteId, p.empresaId())
+                    .orElseThrow(() -> new NegocioException("Cliente no encontrado."));
             venta.setCliente(cliente);
-            
+
             if ("CREDITO".equalsIgnoreCase(metodoPago)) {
-                Double deudaActual = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
-                cliente.setDeudaActual(deudaActual + montoTotal);
-                clienteRepository.save(cliente); 
+                double deuda = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
+                cliente.setDeudaActual(deuda + totalServidor);
+                clienteRepository.save(cliente);
             }
         } else if ("CREDITO".equalsIgnoreCase(metodoPago)) {
-            throw new RuntimeException("Para vender con crédito, debe seleccionar un cliente.");
+            throw new NegocioException("Para vender a crédito debes seleccionar un cliente.");
         }
-        
+
         venta.setDetalles(detalles);
-        
-        // Al ejecutar .save(venta) ahora sucursal ya no estará en null
         ventaRepository.save(venta);
 
-        TurnoCaja turnoActivo = turnoCajaRepository.findByCajeroIdAndEstado(usuarioId, "ABIERTA")
-            .orElseThrow(() -> new RuntimeException("No se puede procesar la venta: No hay un turno de caja abierto para este cajero."));
-
-        BigDecimal montoEnBigDecimal = BigDecimal.valueOf(montoTotal);
-
+        BigDecimal monto = BigDecimal.valueOf(totalServidor);
         if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {
-            BigDecimal efectivoActual = turnoActivo.getVentasEfectivo() != null 
-                                        ? turnoActivo.getVentasEfectivo() 
-                                        : BigDecimal.ZERO;
-            turnoActivo.setVentasEfectivo(efectivoActual.add(montoEnBigDecimal));
-            
+            turno.setVentasEfectivo(nz(turno.getVentasEfectivo()).add(monto));
         } else if ("TARJETA".equalsIgnoreCase(metodoPago)) {
-            BigDecimal tarjetaActual = turnoActivo.getVentasTarjeta() != null 
-                                    ? turnoActivo.getVentasTarjeta() 
-                                    : BigDecimal.ZERO;
-            turnoActivo.setVentasTarjeta(tarjetaActual.add(montoEnBigDecimal));
-            
+            turno.setVentasTarjeta(nz(turno.getVentasTarjeta()).add(monto));
         } else if ("CREDITO".equalsIgnoreCase(metodoPago)) {
-            BigDecimal creditoActual = turnoActivo.getVentasCredito() != null 
-                                    ? turnoActivo.getVentasCredito() 
-                                    : BigDecimal.ZERO;
-            turnoActivo.setVentasCredito(creditoActual.add(montoEnBigDecimal));
-            
-            // Genera e imprime el Vale de Crédito de la venta fiada
-            valeCreditoPdfService.generarGuardarYImprimirVale(venta, venta.getEmpresa().getRazonSocial());
+            turno.setVentasCredito(nz(turno.getVentasCredito()).add(monto));
+            try {
+                valeCreditoPdfService.generarGuardarYImprimirVale(venta, venta.getEmpresa().getRazonSocial());
+            } catch (Exception e) {
+                log.warn("No se pudo generar el vale de crédito de la venta {}: {}", venta.getId(), e.getMessage());
+            }
+        } else {
+            throw new NegocioException("Método de pago no soportado: " + metodoPago);
         }
+        turnoCajaRepository.save(turno);
 
-        turnoCajaRepository.save(turnoActivo);
-        
         return venta;
     }
 
-    @Transactional
-    public Map<String, Object> procesarAbonoCliente(Long clienteId, Double montoAbono, String metodoPago, Long usuarioId, Long empresaId) {
-        if (clienteId == null || montoAbono == null || montoAbono <= 0) {
-            throw new RuntimeException("El cliente y un monto de abono válido son obligatorios.");
-        }
-
-        if (empresaId == null) {
-            throw new RuntimeException("El ID de la empresa es obligatorio para registrar el abono.");
-        }
-
-        Cliente cliente = clienteRepository.findById(clienteId)
-                .orElseThrow(() -> new RuntimeException("Cliente no encontrado con el ID: " + clienteId));
-
-        Empresa empresa = empresaRepository.findById(empresaId)
-                .orElseThrow(() -> new RuntimeException("Empresa no encontrada con el ID: " + empresaId));
-
-        Double saldoAnterior = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
-        Double saldoRestante = Math.max(0.0, saldoAnterior - montoAbono);
-
-        // 1. Actualizar deuda del cliente
-        cliente.setDeudaActual(saldoRestante);
-        clienteRepository.save(cliente);
-
-        // 2. Actualizar turno de caja activo
-        if (usuarioId != null) {
-            turnoCajaRepository.findByCajeroIdAndEstado(usuarioId, "ABIERTA").ifPresent(turnoActivo -> {
-                BigDecimal montoBD = BigDecimal.valueOf(montoAbono);
-
-                BigDecimal abonosActuales = turnoActivo.getAbonosCredito() != null ? turnoActivo.getAbonosCredito() : BigDecimal.ZERO;
-                turnoActivo.setAbonosCredito(abonosActuales.add(montoBD));
-
-                if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {
-                    BigDecimal efectivo = turnoActivo.getVentasEfectivo() != null ? turnoActivo.getVentasEfectivo() : BigDecimal.ZERO;
-                    turnoActivo.setVentasEfectivo(efectivo.add(montoBD));
-                } else if ("TARJETA".equalsIgnoreCase(metodoPago)) {
-                    BigDecimal tarjeta = turnoActivo.getVentasTarjeta() != null ? turnoActivo.getVentasTarjeta() : BigDecimal.ZERO;
-                    turnoActivo.setVentasTarjeta(tarjeta.add(montoBD));
-                }
-
-                turnoCajaRepository.save(turnoActivo);
-            });
-        }
-
-        // 3. Generar PDF e imprimir usando la razón social de la empresa
-        String rutaPdf = valeCreditoPdfService.generarGuardarYImprimirAbono(
-                cliente.getNombre(),
-                cliente.getRut(),
-                montoAbono,
-                saldoAnterior,
-                saldoRestante,
-                metodoPago,
-                empresa.getRazonSocial()
-        );
-
-        Map<String, Object> respuesta = new HashMap<>();
-        respuesta.put("clienteNombre", cliente.getNombre());
-        respuesta.put("clienteRut", cliente.getRut());
-        respuesta.put("saldoAnterior", saldoAnterior);
-        respuesta.put("saldoRestante", saldoRestante);
-        respuesta.put("montoAbonado", montoAbono);
-        respuesta.put("comprobantePdf", rutaPdf);
-
-        return respuesta;
+    private static BigDecimal nz(BigDecimal v) {
+        return v != null ? v : BigDecimal.ZERO;
     }
 }

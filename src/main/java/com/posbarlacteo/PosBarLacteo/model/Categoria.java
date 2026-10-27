@@ -19,6 +19,7 @@ import lombok.Data;
     @UniqueConstraint(columnNames = {"nombre", "empresa_id"})
 })
 @Data
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Categoria {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -30,6 +31,7 @@ public class Categoria {
     @Column(name = "activo")
     private boolean activo = true;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "empresa_id", nullable = false)
     private Empresa empresa;

@@ -1,5 +1,8 @@
 package com.posbarlacteo.PosBarLacteo.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -20,6 +23,7 @@ import lombok.Data;
     }
 )
 @Data
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Usuario {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -28,6 +32,8 @@ public class Usuario {
     @Column(name = "usuario", nullable = false)
     private String usuario;
 
+    // WRITE_ONLY: puede recibirse en JSON (login/registro) pero NUNCA se devuelve al cliente
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Column(name = "contrasena")
     private String contrasena;
 

@@ -2,8 +2,7 @@ package com.posbarlacteo.PosBarLacteo.controller;
 
 import java.util.List;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,61 +10,77 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.posbarlacteo.PosBarLacteo.exception.ConflictoException;
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
+import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
 import com.posbarlacteo.PosBarLacteo.model.Categoria;
 import com.posbarlacteo.PosBarLacteo.repository.CategoriaRepository;
+import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
+import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
+import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 
-@CrossOrigin(origins = {
-    "http://posbarlacteo-manuel-2026.s3-website-us-east-1.amazonaws.com", // Producción AWS
-    "http://localhost:5173",
-    "http://34.203.91.138",
-    "https://ordpos.duckdns.org",                                             // PC Local
-    "http://192.168.100.85:5173"                                         // Tu Celular
-})
 @RestController
 @RequestMapping("/api/categorias")
 public class CategoriaController {
 
-    @Autowired
-    private CategoriaRepository categoriaRepository;
+    private final CategoriaRepository categoriaRepository;
+    private final EmpresaRepository empresaRepository;
 
-    // Obtener todas las categorías activas
+    public CategoriaController(CategoriaRepository categoriaRepository, EmpresaRepository empresaRepository) {
+        this.categoriaRepository = categoriaRepository;
+        this.empresaRepository = empresaRepository;
+    }
+
     @GetMapping
-    public List<Categoria> obtenerTodas(@RequestParam(required = false) Long empresaId) {
-        if (empresaId != null) {
-            // ✨ Ahora sí le entregamos a cada empresa únicamente sus datos
-            return categoriaRepository.findByEmpresaIdAndActivoTrue(empresaId);
-        }
-        return categoriaRepository.findByActivoTrue();
+    public List<Categoria> obtenerTodas() {
+        return categoriaRepository.findByEmpresaIdAndActivoTrue(SecurityUtils.actual().empresaId());
     }
 
-    // Crear una nueva categoría
     @PostMapping
-    public Categoria guardar(@RequestBody Categoria categoria) {
-        categoria.setActivo(true);
-        return categoriaRepository.save(categoria);
+    @Transactional
+    public Categoria guardar(@RequestBody Categoria body) {
+        AuthPrincipal p = SecurityUtils.actual();
+        String nombre = nombreValido(body);
+        Categoria nueva = new Categoria();
+        nueva.setNombre(nombre);
+        nueva.setActivo(true);
+        nueva.setEmpresa(empresaRepository.findById(p.empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada.")));
+        try {
+            return categoriaRepository.saveAndFlush(nueva);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw new ConflictoException("Ya existe una categoría con ese nombre.");
+        }
     }
 
-    // Editar una categoría existente
     @PutMapping("/{id}")
-    public Categoria actualizar(@PathVariable Long id, @RequestBody Categoria categoriaActualizada) {
-        return categoriaRepository.findById(id)
-            .map(categoria -> {
-                categoria.setNombre(categoriaActualizada.getNombre());
-                // Puedes agregar más campos aquí en el futuro si la categoría crece
-                return categoriaRepository.save(categoria);
-            })
-            .orElseThrow(() -> new RuntimeException("Categoría no encontrada con id: " + id));
+    @Transactional
+    public Categoria actualizar(@PathVariable Long id, @RequestBody Categoria body) {
+        Categoria categoria = categoriaRepository.findByIdAndEmpresaId(id, SecurityUtils.actual().empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Categoría no encontrada."));
+        categoria.setNombre(nombreValido(body));
+        try {
+            return categoriaRepository.saveAndFlush(categoria);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw new ConflictoException("Ya existe una categoría con ese nombre.");
+        }
     }
 
-    // Eliminación lógica de la categoría
     @DeleteMapping("/{id}")
+    @Transactional
     public void eliminar(@PathVariable Long id) {
-        categoriaRepository.findById(id).ifPresent(c -> {
-            c.setActivo(false);
-            categoriaRepository.save(c);
-        });
+        Categoria categoria = categoriaRepository.findByIdAndEmpresaId(id, SecurityUtils.actual().empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Categoría no encontrada."));
+        categoria.setActivo(false);
+        categoriaRepository.save(categoria);
+    }
+
+    private String nombreValido(Categoria body) {
+        if (body.getNombre() == null || body.getNombre().isBlank()) {
+            throw new NegocioException("El nombre de la categoría es obligatorio.");
+        }
+        return body.getNombre().trim();
     }
 }

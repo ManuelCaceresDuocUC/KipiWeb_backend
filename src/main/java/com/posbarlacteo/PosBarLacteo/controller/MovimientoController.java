@@ -1,55 +1,58 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.model.Venta;
 import com.posbarlacteo.PosBarLacteo.repository.VentaRepository;
+import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
+import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 
+/** Historial de ventas de la empresa del token. Un vendedor ve solo las suyas; el admin ve todas. */
 @RestController
 @RequestMapping("/api/movimientos")
-@CrossOrigin(origins = {
-    "http://posbarlacteo-manuel-2026.s3-website-us-east-1.amazonaws.com", // Producción AWS
-    "http://localhost:5173",
-    "http://34.203.91.138",
-    "https://ordpos.duckdns.org",                                             // PC Local
-    "http://192.168.100.85:5173"                                         // Tu Celular
-})
 public class MovimientoController {
 
-    @Autowired
-    private VentaRepository ventaRepository;
+    private final VentaRepository ventaRepository;
+
+    public MovimientoController(VentaRepository ventaRepository) {
+        this.ventaRepository = ventaRepository;
+    }
 
     @GetMapping
+    @Transactional(readOnly = true)
     public List<Venta> obtenerHistorial(
-            @RequestParam(defaultValue = "1") Long empresaId, // ✨ 1. Recibimos el ID de la empresa
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fechaInicio,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fechaFin
-    ) {
-        // Si no mandan fechaInicio, asumimos que quieren ver las ventas de HOY
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fechaFin) {
+        AuthPrincipal p = SecurityUtils.actual();
+
         if (fechaInicio == null) {
             fechaInicio = LocalDate.now();
-            fechaFin = LocalDate.now();
-        } 
-        // Si mandan inicio pero no fin, asumimos que quieren ver un solo día específico
-        else if (fechaFin == null) {
+            fechaFin = fechaInicio;
+        } else if (fechaFin == null) {
             fechaFin = fechaInicio;
         }
+        if (fechaFin.isBefore(fechaInicio)) {
+            throw new NegocioException("La fecha final no puede ser anterior a la inicial.");
+        }
 
-        // Convertimos a LocalDateTime: Inicio del día (00:00:00) y Fin del día (23:59:59)
-        LocalDateTime inicioDelDia = fechaInicio.atStartOfDay();
-        LocalDateTime finDelDia = fechaFin.atTime(23, 59, 59);
+        List<Venta> ventas = ventaRepository.findByEmpresaIdAndFechaHoraBetween(
+                p.empresaId(), fechaInicio.atStartOfDay(), fechaFin.atTime(LocalTime.MAX));
 
-        // ✨ 2. Pasamos el empresaId al repositorio
-        return ventaRepository.findByEmpresaIdAndFechaHoraBetween(empresaId, inicioDelDia, finDelDia);
+        if (!p.esAdmin()) {
+            ventas = ventas.stream()
+                    .filter(v -> v.getUsuario() != null && p.usuarioId().equals(v.getUsuario().getId()))
+                    .toList();
+        }
+        return ventas;
     }
 }
