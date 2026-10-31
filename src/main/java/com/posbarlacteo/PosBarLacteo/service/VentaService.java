@@ -2,7 +2,9 @@ package com.posbarlacteo.PosBarLacteo.service;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,11 +42,12 @@ public class VentaService {
     private final UsuarioRepository usuarioRepository;
     private final ClienteRepository clienteRepository;
     private final ValeCreditoPdfService valeCreditoPdfService;
+    private final InventarioService inventarioService;
 
     public VentaService(ProductoRepository productoRepository, RecetaRepository recetaRepository,
                         VentaRepository ventaRepository, TurnoCajaRepository turnoCajaRepository,
                         UsuarioRepository usuarioRepository, ClienteRepository clienteRepository,
-                        ValeCreditoPdfService valeCreditoPdfService) {
+                        ValeCreditoPdfService valeCreditoPdfService, InventarioService inventarioService) {
         this.productoRepository = productoRepository;
         this.recetaRepository = recetaRepository;
         this.ventaRepository = ventaRepository;
@@ -52,6 +55,7 @@ public class VentaService {
         this.usuarioRepository = usuarioRepository;
         this.clienteRepository = clienteRepository;
         this.valeCreditoPdfService = valeCreditoPdfService;
+        this.inventarioService = inventarioService;
     }
 
     /**
@@ -86,6 +90,8 @@ public class VentaService {
         venta.setSucursal(usuario.getSucursal());
 
         List<VentaDetalle> detalles = new ArrayList<>();
+        Map<Long, Double> consumo = new HashMap<>();
+        Map<Long, String> nombres = new HashMap<>();
         double total = 0.0;
 
         for (ItemVenta item : items) {
@@ -102,15 +108,16 @@ public class VentaService {
                 throw new NegocioException("\"" + producto.getDescripcion() + "\" es un insumo y no se vende directamente.");
             }
 
+            // Qué se consume realmente: el producto, o sus insumos si tiene receta
             List<Receta> ingredientes = recetaRepository.findByProductoPrincipalId(producto.getId());
             if (ingredientes.isEmpty()) {
-                producto.setStock(producto.getStock() - item.getCantidad());
-                productoRepository.save(producto);
+                consumo.merge(producto.getId(), item.getCantidad(), Double::sum);
+                nombres.put(producto.getId(), producto.getDescripcion());
             } else {
                 for (Receta receta : ingredientes) {
                     Producto insumo = receta.getInsumo();
-                    insumo.setStock(insumo.getStock() - receta.getCantidadUsada() * item.getCantidad());
-                    productoRepository.save(insumo);
+                    consumo.merge(insumo.getId(), receta.getCantidadUsada() * item.getCantidad(), Double::sum);
+                    nombres.put(insumo.getId(), insumo.getDescripcion());
                 }
             }
 
@@ -146,6 +153,11 @@ public class VentaService {
 
         venta.setDetalles(detalles);
         ventaRepository.save(venta);
+
+        // Stock de la sucursal de la venta, atómico y con historial; si no alcanza (y la empresa no permite
+        // stock negativo) lanza NegocioException y TODA la venta se revierte.
+        inventarioService.descontarVenta(p.empresaId(), usuario.getSucursal().getId(), venta.getId(),
+                p.usuario(), consumo, nombres);
 
         BigDecimal monto = BigDecimal.valueOf(totalServidor);
         if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {

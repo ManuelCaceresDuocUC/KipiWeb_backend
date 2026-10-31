@@ -1,5 +1,7 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +30,7 @@ import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
 import com.posbarlacteo.PosBarLacteo.repository.RecetaRepository;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.InventarioService;
 
 /**
  * Catálogo por empresa. Lectura: cualquier usuario autenticado. Escritura: solo ADMIN (SecurityConfig).
@@ -43,26 +46,35 @@ public class ProductoController {
     private final RecetaRepository recetaRepository;
     private final CategoriaRepository categoriaRepository;
     private final EmpresaRepository empresaRepository;
+    private final InventarioService inventarioService;
 
     public ProductoController(ProductoRepository productoRepository, RecetaRepository recetaRepository,
-                              CategoriaRepository categoriaRepository, EmpresaRepository empresaRepository) {
+                              CategoriaRepository categoriaRepository, EmpresaRepository empresaRepository,
+                              InventarioService inventarioService) {
         this.productoRepository = productoRepository;
         this.recetaRepository = recetaRepository;
         this.categoriaRepository = categoriaRepository;
         this.empresaRepository = empresaRepository;
+        this.inventarioService = inventarioService;
     }
 
+    /**
+     * Catálogo de la empresa. El campo "stock" de cada producto es el de UNA sucursal: la del usuario,
+     * o (solo admin) la indicada en ?sucursalId.
+     */
     @GetMapping
     public Page<Producto> obtenerTodos(
             @RequestParam(required = false) Long categoriaId,
+            @RequestParam(required = false) Long sucursalId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         AuthPrincipal p = SecurityUtils.actual();
         PageRequest pr = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), TAM_MAX_PAGINA));
-        if (categoriaId != null) {
-            return productoRepository.findByActivoTrueAndCategoriaIdAndEmpresaId(categoriaId, p.empresaId(), pr);
-        }
-        return productoRepository.findByActivoTrueAndEmpresaId(p.empresaId(), pr);
+        Page<Producto> resultado = categoriaId != null
+                ? productoRepository.findByActivoTrueAndCategoriaIdAndEmpresaId(categoriaId, p.empresaId(), pr)
+                : productoRepository.findByActivoTrueAndEmpresaId(p.empresaId(), pr);
+        completarStock(resultado.getContent(), p, sucursalId);
+        return resultado;
     }
 
     @DeleteMapping("/{id}")
@@ -85,14 +97,17 @@ public class ProductoController {
         producto.setCodigoBarras(codigo);
         producto.setDescripcion(body.getDescripcion().trim());
         producto.setPrecio(body.getPrecio());
-        producto.setStock(body.getStock() != null ? body.getStock() : producto.getStock());
+        // El stock NO se edita aquí (evita pisar ventas simultáneas): se usa /api/inventario/movimientos.
+        producto.setCosto(body.getCosto());
         producto.setStockCritico(body.getStockCritico());
         producto.setCategoria(resolverCategoria(body.getCategoria(), p.empresaId()));
         producto.setUnidadMedida(body.getUnidadMedida());
         if (body.getEsInsumo() != null) {
             producto.setEsInsumo(body.getEsInsumo());
         }
-        return productoRepository.save(producto);
+        Producto guardado = productoRepository.save(producto);
+        completarStock(List.of(guardado), p, null);
+        return guardado;
     }
 
     @PatchMapping("/{id}")
@@ -109,7 +124,7 @@ public class ProductoController {
             if (body.getPrecio() < 0 || body.getPrecio().isNaN()) throw new NegocioException("El precio no es válido.");
             producto.setPrecio(body.getPrecio());
         }
-        if (body.getStock() != null) producto.setStock(body.getStock());
+        if (body.getCosto() != null) producto.setCosto(body.getCosto());
         if (body.getStockCritico() != null) producto.setStockCritico(body.getStockCritico());
         if (body.getUnidadMedida() != null) producto.setUnidadMedida(body.getUnidadMedida());
         if (body.getEsInsumo() != null) producto.setEsInsumo(body.getEsInsumo());
@@ -122,7 +137,9 @@ public class ProductoController {
             validarCodigoUnico(codigo, p.empresaId(), id);
             producto.setCodigoBarras(codigo);
         }
-        return productoRepository.save(producto);
+        Producto guardado = productoRepository.save(producto);
+        completarStock(List.of(guardado), p, null);
+        return guardado;
     }
 
     @PostMapping
@@ -142,8 +159,16 @@ public class ProductoController {
         body.setCodigoBarras(codigo);
         body.setDescripcion(body.getDescripcion().trim());
         body.setCategoria(resolverCategoria(body.getCategoria(), p.empresaId()));
-        if (body.getStock() == null) body.setStock(0.0);
-        return productoRepository.save(body);
+        double stockInicial = body.getStock() != null ? body.getStock() : 0.0;
+        if (stockInicial < 0 || Double.isNaN(stockInicial)) {
+            throw new NegocioException("El stock inicial no puede ser negativo.");
+        }
+        body.setStockLegacy(0.0);
+        body.setStock(null);
+        Producto guardado = productoRepository.save(body);
+        inventarioService.cargarStockInicial(p, guardado, stockInicial);
+        completarStock(List.of(guardado), p, null);
+        return guardado;
     }
 
     @PostMapping("/con-receta")
@@ -164,7 +189,8 @@ public class ProductoController {
         principal.setEmpresa(empresa);
         principal.setActivo(true);
         principal.setEsInsumo(false);
-        principal.setStock(0.0);
+        principal.setStockLegacy(0.0);
+        principal.setStock(null);
         principal.setCodigoBarras(codigo);
         principal.setDescripcion(principal.getDescripcion().trim());
         principal.setCategoria(resolverCategoria(principal.getCategoria(), p.empresaId()));
@@ -194,10 +220,20 @@ public class ProductoController {
                 recetaRepository.save(vinculo);
             }
         }
+        completarStock(List.of(nuevo), p, null);
         return nuevo;
     }
 
     // ---------- helpers ----------
+
+    /** Completa Producto.stock con el de la sucursal pedida; sin sucursal asignada, 0. */
+    private void completarStock(List<Producto> lista, AuthPrincipal p, Long sucursalSolicitada) {
+        if (sucursalSolicitada == null && p.sucursalId() == null) {
+            lista.forEach(pr -> pr.setStock(0.0));
+            return;
+        }
+        inventarioService.poblarStock(lista, inventarioService.resolverSucursal(p, sucursalSolicitada));
+    }
 
     private Producto buscar(Long id) {
         return productoRepository.findByIdAndEmpresaId(id, SecurityUtils.actual().empresaId())

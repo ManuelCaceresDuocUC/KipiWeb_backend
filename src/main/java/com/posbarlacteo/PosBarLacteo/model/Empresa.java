@@ -175,4 +175,16 @@ public class Empresa {
     public void setFlowSubscriptionId(String flowSubscriptionId) {
         this.flowSubscriptionId = flowSubscriptionId;
     }
+
+    // Política de inventario por empresa. null = comportamiento histórico (se permite vender sin stock).
+    @Column(name = "permite_stock_negativo")
+    private Boolean permiteStockNegativo;
+
+    public Boolean getPermiteStockNegativo() {
+        return permiteStockNegativo;
+    }
+
+    public void setPermiteStockNegativo(Boolean permiteStockNegativo) {
+        this.permiteStockNegativo = permiteStockNegativo;
+    }
 }

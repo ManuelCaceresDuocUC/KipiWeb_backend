@@ -12,7 +12,9 @@ import jakarta.persistence.Table;
 import lombok.Data;
 
 @Entity
-@Table(name = "inventario_sucursal")
+@Table(name = "inventario_sucursal", uniqueConstraints = {
+    @jakarta.persistence.UniqueConstraint(name = "uk_inventario_producto_sucursal", columnNames = {"producto_id", "sucursal_id"})
+})
 @Data // ✨ AÑADIDO para generar Getters, Setters y constructores automáticamente
 public class InventarioSucursal {
 

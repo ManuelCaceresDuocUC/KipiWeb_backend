@@ -1,0 +1,905 @@
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/controller/AdminController.java b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/AdminController.java
+index 6629216..ecf6aa6 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/controller/AdminController.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/AdminController.java
+@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
+ import org.springframework.web.bind.annotation.RequestParam;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+-import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
++import com.posbarlacteo.PosBarLacteo.repository.InventarioSucursalRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.VentaRepository;
+ import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+ 
+@@ -24,11 +24,11 @@ import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+ public class AdminController {
+ 
+     private final VentaRepository ventaRepository;
+-    private final ProductoRepository productoRepository;
++    private final InventarioSucursalRepository inventarioRepository;
+ 
+-    public AdminController(VentaRepository ventaRepository, ProductoRepository productoRepository) {
++    public AdminController(VentaRepository ventaRepository, InventarioSucursalRepository inventarioRepository) {
+         this.ventaRepository = ventaRepository;
+-        this.productoRepository = productoRepository;
++        this.inventarioRepository = inventarioRepository;
+     }
+ 
+     // ==========================================
+@@ -50,7 +50,7 @@ public class AdminController {
+         Double ventasHoy = ventaRepository.sumarVentasDelDia(empresaId, inicioHoy, finHoy);
+         Double ventasMes = ventaRepository.sumarVentasDelMes(empresaId, inicioMes);
+         Double ticketPromedio = ventaRepository.obtenerTicketPromedioDelDia(empresaId, inicioHoy, finHoy);
+-        Double costoInventario = productoRepository.calcularValorTotalInventario(empresaId);
++        Double costoInventario = inventarioRepository.valorInventarioEmpresa(empresaId);
+         
+         // Validamos nulos por si no hay ventas aún
+         ventasHoy = (ventasHoy != null) ? ventasHoy : 0.0;
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/controller/InventarioController.java b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/InventarioController.java
+new file mode 100644
+index 0000000..3fd567d
+--- /dev/null
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/InventarioController.java
+@@ -0,0 +1,84 @@
++package com.posbarlacteo.PosBarLacteo.controller;
++
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.PutMapping;
++import org.springframework.web.bind.annotation.RequestBody;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RequestParam;
++import org.springframework.web.bind.annotation.RestController;
++
++import com.posbarlacteo.PosBarLacteo.dto.MovimientoInventarioRequest;
++import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
++import com.posbarlacteo.PosBarLacteo.repository.SucursalRepository;
++import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
++import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
++import com.posbarlacteo.PosBarLacteo.service.InventarioService;
++
++/** Gestión de inventario. Solo ADMIN (ver SecurityConfig: /api/inventario/**). */
++@RestController
++@RequestMapping("/api/inventario")
++public class InventarioController {
++
++    private final InventarioService inventarioService;
++    private final SucursalRepository sucursalRepository;
++
++    public InventarioController(InventarioService inventarioService, SucursalRepository sucursalRepository) {
++        this.inventarioService = inventarioService;
++        this.sucursalRepository = sucursalRepository;
++    }
++
++    /** Sucursales de la empresa (para el selector del panel de inventario). */
++    @GetMapping("/sucursales")
++    public List<Map<String, Object>> sucursales() {
++        AuthPrincipal p = SecurityUtils.actual();
++        return sucursalRepository.findByEmpresaIdAndActivoTrueOrderByIdAsc(p.empresaId()).stream().map(s -> {
++            Map<String, Object> m = new LinkedHashMap<>();
++            m.put("id", s.getId());
++            m.put("nombre", s.getNombre());
++            m.put("esCasaMatriz", s.isEsCasaMatriz());
++            m.put("propia", s.getId().equals(p.sucursalId()));
++            return m;
++        }).toList();
++    }
++
++    @GetMapping("/configuracion")
++    public Map<String, Object> configuracion() {
++        AuthPrincipal p = SecurityUtils.actual();
++        return Map.of("permiteStockNegativo", inventarioService.permiteStockNegativo(p.empresaId()));
++    }
++
++    @PutMapping("/configuracion")
++    public Map<String, Object> guardarConfiguracion(@RequestBody Map<String, Object> body) {
++        AuthPrincipal p = SecurityUtils.actual();
++        Object valor = body.get("permiteStockNegativo");
++        if (!(valor instanceof Boolean permite)) {
++            throw new NegocioException("Indica si se permite o no el stock negativo.");
++        }
++        inventarioService.definirPermiteStockNegativo(p.empresaId(), permite);
++        return Map.of("permiteStockNegativo", permite);
++    }
++
++    @PostMapping("/movimientos")
++    public Map<String, Object> registrar(@RequestBody MovimientoInventarioRequest req) {
++        AuthPrincipal p = SecurityUtils.actual();
++        if (req.getProductoId() == null || req.getCantidad() == null) {
++            throw new NegocioException("Indica el producto y la cantidad.");
++        }
++        double stock = inventarioService.registrarManual(p, req.getSucursalId(), req.getProductoId(),
++                req.getTipo(), req.getCantidad(), req.getMotivo());
++        return Map.of("stock", stock);
++    }
++
++    @GetMapping("/movimientos")
++    public Map<String, Object> historial(@RequestParam(required = false) Long productoId,
++                                         @RequestParam(required = false) Long sucursalId,
++                                         @RequestParam(defaultValue = "0") int page,
++                                         @RequestParam(defaultValue = "50") int size) {
++        return inventarioService.listarMovimientos(SecurityUtils.actual(), sucursalId, productoId, page, size);
++    }
++}
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ProductoController.java b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ProductoController.java
+index a3bc7ef..aa6fbd2 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ProductoController.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ProductoController.java
+@@ -1,5 +1,7 @@
+ package com.posbarlacteo.PosBarLacteo.controller;
+ 
++import java.util.List;
++
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.PageRequest;
+ import org.springframework.transaction.annotation.Transactional;
+@@ -28,6 +30,7 @@ import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.RecetaRepository;
+ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
+ import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
++import com.posbarlacteo.PosBarLacteo.service.InventarioService;
+ 
+ /**
+  * Catálogo por empresa. Lectura: cualquier usuario autenticado. Escritura: solo ADMIN (SecurityConfig).
+@@ -43,26 +46,35 @@ public class ProductoController {
+     private final RecetaRepository recetaRepository;
+     private final CategoriaRepository categoriaRepository;
+     private final EmpresaRepository empresaRepository;
++    private final InventarioService inventarioService;
+ 
+     public ProductoController(ProductoRepository productoRepository, RecetaRepository recetaRepository,
+-                              CategoriaRepository categoriaRepository, EmpresaRepository empresaRepository) {
++                              CategoriaRepository categoriaRepository, EmpresaRepository empresaRepository,
++                              InventarioService inventarioService) {
+         this.productoRepository = productoRepository;
+         this.recetaRepository = recetaRepository;
+         this.categoriaRepository = categoriaRepository;
+         this.empresaRepository = empresaRepository;
++        this.inventarioService = inventarioService;
+     }
+ 
++    /**
++     * Catálogo de la empresa. El campo "stock" de cada producto es el de UNA sucursal: la del usuario,
++     * o (solo admin) la indicada en ?sucursalId.
++     */
+     @GetMapping
+     public Page<Producto> obtenerTodos(
+             @RequestParam(required = false) Long categoriaId,
++            @RequestParam(required = false) Long sucursalId,
+             @RequestParam(defaultValue = "0") int page,
+             @RequestParam(defaultValue = "20") int size) {
+         AuthPrincipal p = SecurityUtils.actual();
+         PageRequest pr = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), TAM_MAX_PAGINA));
+-        if (categoriaId != null) {
+-            return productoRepository.findByActivoTrueAndCategoriaIdAndEmpresaId(categoriaId, p.empresaId(), pr);
+-        }
+-        return productoRepository.findByActivoTrueAndEmpresaId(p.empresaId(), pr);
++        Page<Producto> resultado = categoriaId != null
++                ? productoRepository.findByActivoTrueAndCategoriaIdAndEmpresaId(categoriaId, p.empresaId(), pr)
++                : productoRepository.findByActivoTrueAndEmpresaId(p.empresaId(), pr);
++        completarStock(resultado.getContent(), p, sucursalId);
++        return resultado;
+     }
+ 
+     @DeleteMapping("/{id}")
+@@ -85,14 +97,17 @@ public class ProductoController {
+         producto.setCodigoBarras(codigo);
+         producto.setDescripcion(body.getDescripcion().trim());
+         producto.setPrecio(body.getPrecio());
+-        producto.setStock(body.getStock() != null ? body.getStock() : producto.getStock());
++        // El stock NO se edita aquí (evita pisar ventas simultáneas): se usa /api/inventario/movimientos.
++        producto.setCosto(body.getCosto());
+         producto.setStockCritico(body.getStockCritico());
+         producto.setCategoria(resolverCategoria(body.getCategoria(), p.empresaId()));
+         producto.setUnidadMedida(body.getUnidadMedida());
+         if (body.getEsInsumo() != null) {
+             producto.setEsInsumo(body.getEsInsumo());
+         }
+-        return productoRepository.save(producto);
++        Producto guardado = productoRepository.save(producto);
++        completarStock(List.of(guardado), p, null);
++        return guardado;
+     }
+ 
+     @PatchMapping("/{id}")
+@@ -109,7 +124,7 @@ public class ProductoController {
+             if (body.getPrecio() < 0 || body.getPrecio().isNaN()) throw new NegocioException("El precio no es válido.");
+             producto.setPrecio(body.getPrecio());
+         }
+-        if (body.getStock() != null) producto.setStock(body.getStock());
++        if (body.getCosto() != null) producto.setCosto(body.getCosto());
+         if (body.getStockCritico() != null) producto.setStockCritico(body.getStockCritico());
+         if (body.getUnidadMedida() != null) producto.setUnidadMedida(body.getUnidadMedida());
+         if (body.getEsInsumo() != null) producto.setEsInsumo(body.getEsInsumo());
+@@ -122,7 +137,9 @@ public class ProductoController {
+             validarCodigoUnico(codigo, p.empresaId(), id);
+             producto.setCodigoBarras(codigo);
+         }
+-        return productoRepository.save(producto);
++        Producto guardado = productoRepository.save(producto);
++        completarStock(List.of(guardado), p, null);
++        return guardado;
+     }
+ 
+     @PostMapping
+@@ -142,8 +159,16 @@ public class ProductoController {
+         body.setCodigoBarras(codigo);
+         body.setDescripcion(body.getDescripcion().trim());
+         body.setCategoria(resolverCategoria(body.getCategoria(), p.empresaId()));
+-        if (body.getStock() == null) body.setStock(0.0);
+-        return productoRepository.save(body);
++        double stockInicial = body.getStock() != null ? body.getStock() : 0.0;
++        if (stockInicial < 0 || Double.isNaN(stockInicial)) {
++            throw new NegocioException("El stock inicial no puede ser negativo.");
++        }
++        body.setStockLegacy(0.0);
++        body.setStock(null);
++        Producto guardado = productoRepository.save(body);
++        inventarioService.cargarStockInicial(p, guardado, stockInicial);
++        completarStock(List.of(guardado), p, null);
++        return guardado;
+     }
+ 
+     @PostMapping("/con-receta")
+@@ -164,7 +189,8 @@ public class ProductoController {
+         principal.setEmpresa(empresa);
+         principal.setActivo(true);
+         principal.setEsInsumo(false);
+-        principal.setStock(0.0);
++        principal.setStockLegacy(0.0);
++        principal.setStock(null);
+         principal.setCodigoBarras(codigo);
+         principal.setDescripcion(principal.getDescripcion().trim());
+         principal.setCategoria(resolverCategoria(principal.getCategoria(), p.empresaId()));
+@@ -194,11 +220,21 @@ public class ProductoController {
+                 recetaRepository.save(vinculo);
+             }
+         }
++        completarStock(List.of(nuevo), p, null);
+         return nuevo;
+     }
+ 
+     // ---------- helpers ----------
+ 
++    /** Completa Producto.stock con el de la sucursal pedida; sin sucursal asignada, 0. */
++    private void completarStock(List<Producto> lista, AuthPrincipal p, Long sucursalSolicitada) {
++        if (sucursalSolicitada == null && p.sucursalId() == null) {
++            lista.forEach(pr -> pr.setStock(0.0));
++            return;
++        }
++        inventarioService.poblarStock(lista, inventarioService.resolverSucursal(p, sucursalSolicitada));
++    }
++
+     private Producto buscar(Long id) {
+         return productoRepository.findByIdAndEmpresaId(id, SecurityUtils.actual().empresaId())
+                 .orElseThrow(() -> new RecursoNoEncontradoException("Producto no encontrado."));
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/dto/MovimientoInventarioRequest.java b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/MovimientoInventarioRequest.java
+new file mode 100644
+index 0000000..1b5af3d
+--- /dev/null
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/MovimientoInventarioRequest.java
+@@ -0,0 +1,15 @@
++package com.posbarlacteo.PosBarLacteo.dto;
++
++import lombok.Data;
++
++@Data
++public class MovimientoInventarioRequest {
++    private Long productoId;
++    /** ENTRADA, MERMA o AJUSTE */
++    private String tipo;
++    /** ENTRADA/MERMA: unidades. AJUSTE: stock contado físicamente. */
++    private Double cantidad;
++    private String motivo;
++    /** Opcional (solo admin): sucursal distinta a la propia. */
++    private Long sucursalId;
++}
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java
+index 7e77639..5fddb55 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java
+@@ -175,4 +175,16 @@ public class Empresa {
+     public void setFlowSubscriptionId(String flowSubscriptionId) {
+         this.flowSubscriptionId = flowSubscriptionId;
+     }
++
++    // Política de inventario por empresa. null = comportamiento histórico (se permite vender sin stock).
++    @Column(name = "permite_stock_negativo")
++    private Boolean permiteStockNegativo;
++
++    public Boolean getPermiteStockNegativo() {
++        return permiteStockNegativo;
++    }
++
++    public void setPermiteStockNegativo(Boolean permiteStockNegativo) {
++        this.permiteStockNegativo = permiteStockNegativo;
++    }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/model/InventarioSucursal.java b/src/main/java/com/posbarlacteo/PosBarLacteo/model/InventarioSucursal.java
+index 8d06d87..8441e2f 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/model/InventarioSucursal.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/model/InventarioSucursal.java
+@@ -12,7 +12,9 @@ import jakarta.persistence.Table;
+ import lombok.Data;
+ 
+ @Entity
+-@Table(name = "inventario_sucursal")
++@Table(name = "inventario_sucursal", uniqueConstraints = {
++    @jakarta.persistence.UniqueConstraint(name = "uk_inventario_producto_sucursal", columnNames = {"producto_id", "sucursal_id"})
++})
+ @Data // ✨ AÑADIDO para generar Getters, Setters y constructores automáticamente
+ public class InventarioSucursal {
+ 
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoInventario.java b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoInventario.java
+new file mode 100644
+index 0000000..e7d3280
+--- /dev/null
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoInventario.java
+@@ -0,0 +1,79 @@
++package com.posbarlacteo.PosBarLacteo.model;
++
++import java.time.LocalDateTime;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Index;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.PrePersist;
++import jakarta.persistence.Table;
++import lombok.Getter;
++import lombok.Setter;
++
++/** Historial inmutable de cada cambio de stock (venta, entrada, merma, ajuste...). */
++@Entity
++@Table(name = "movimientos_inventario", indexes = {
++    @Index(name = "idx_mov_inv_empresa_fecha", columnList = "empresa_id, fecha_hora"),
++    @Index(name = "idx_mov_inv_producto", columnList = "producto_id, sucursal_id")
++})
++@Getter
++@Setter
++public class MovimientoInventario {
++
++    public static final String VENTA = "VENTA";
++    public static final String ENTRADA = "ENTRADA";
++    public static final String MERMA = "MERMA";
++    public static final String AJUSTE = "AJUSTE";
++    public static final String INICIAL = "INICIAL";
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    private Long id;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "empresa_id", nullable = false)
++    private Empresa empresa;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "sucursal_id", nullable = false)
++    private Sucursal sucursal;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "producto_id", nullable = false)
++    private Producto producto;
++
++    @Column(nullable = false, length = 20)
++    private String tipo;
++
++    /** Variación con signo: positivo entra, negativo sale. */
++    @Column(nullable = false)
++    private Double cantidad;
++
++    @Column(name = "stock_resultante", nullable = false)
++    private Double stockResultante;
++
++    @Column(length = 255)
++    private String motivo;
++
++    @Column(name = "usuario_nombre", length = 100)
++    private String usuarioNombre;
++
++    @Column(name = "venta_id")
++    private Long ventaId;
++
++    @Column(name = "fecha_hora", nullable = false)
++    private LocalDateTime fechaHora;
++
++    @PrePersist
++    protected void alCrear() {
++        if (fechaHora == null) {
++            fechaHora = LocalDateTime.now();
++        }
++    }
++}
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/model/Producto.java b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Producto.java
+index ccd6d83..92d7cd4 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/model/Producto.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Producto.java
+@@ -16,6 +16,7 @@ import jakarta.persistence.JoinColumn;
+ import jakarta.persistence.ManyToOne;
+ import jakarta.persistence.OneToMany;
+ import jakarta.persistence.Table;
++import jakarta.persistence.Transient;
+ import lombok.Getter;
+ import lombok.Setter;
+ 
+@@ -46,9 +47,20 @@ public class Producto {
+     @Column(nullable = false)
+     private Double precio;
+ 
+-    @Column(nullable = false)
++    // LEGADO: columna "stock" original (stock global). Ya no se usa: el stock real vive en inventario_sucursal.
++    // Se conserva (siempre 0) porque la columna es NOT NULL; la migración SQL la lee una vez.
++    @JsonIgnore
++    @Column(name = "stock", nullable = false)
++    private Double stockLegacy = 0.0;
++
++    // Stock de la sucursal consultada: se completa en cada respuesta, no se guarda aquí.
++    @Transient
+     private Double stock;
+ 
++    // Costo de compra unitario (opcional). Sirve para valorizar el inventario.
++    @Column(name = "costo")
++    private Double costo;
++
+     @Column(name = "stock_critico")
+     private Double stockCritico;
+ 
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/repository/InventarioSucursalRepository.java b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/InventarioSucursalRepository.java
+index 9736d45..1004977 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/repository/InventarioSucursalRepository.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/InventarioSucursalRepository.java
+@@ -1,10 +1,11 @@
+ package com.posbarlacteo.PosBarLacteo.repository;
+ 
++import java.util.Collection;
++import java.util.List;
+ import java.util.Optional;
+ 
+-import org.springframework.data.domain.Page;
+-import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Modifying;
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.query.Param;
+ import org.springframework.stereotype.Repository;
+@@ -14,21 +15,42 @@ import com.posbarlacteo.PosBarLacteo.model.InventarioSucursal;
+ @Repository
+ public interface InventarioSucursalRepository extends JpaRepository<InventarioSucursal, Long> {
+ 
+-    // Obtener inventario de una sucursal específica
+-    Page<InventarioSucursal> findBySucursalId(Long sucursalId, Pageable pageable);
+-
+-    // Buscar el stock de un producto específico en una sucursal
+     Optional<InventarioSucursal> findByProductoIdAndSucursalId(Long productoId, Long sucursalId);
+ 
+-    // Valor del inventario de UNA sucursal
+-    @Query("SELECT COALESCE(SUM(i.stock * i.producto.precio), 0.0) " +
+-           "FROM InventarioSucursal i " +
+-           "WHERE i.sucursal.id = :sucursalId AND i.producto.activo = true")
+-    Double calcularValorInventarioPorSucursal(@Param("sucursalId") Long sucursalId);
+-
+-    // Valor total del inventario de TODAS las sucursales de la empresa (Vista Admin)
+-    @Query("SELECT COALESCE(SUM(i.stock * i.producto.precio), 0.0) " +
+-           "FROM InventarioSucursal i " +
+-           "WHERE i.sucursal.empresa.id = :empresaId AND i.producto.activo = true")
+-    Double calcularValorInventarioTotalEmpresa(@Param("empresaId") Long empresaId);
+-}
+\ No newline at end of file
++    /** Pares [productoId, stock] de una sucursal para una lista de productos (una sola consulta). */
++    @Query("SELECT i.producto.id, i.stock FROM InventarioSucursal i " +
++           "WHERE i.sucursal.id = :sucursalId AND i.producto.id IN :productoIds")
++    List<Object[]> stocksDe(@Param("sucursalId") Long sucursalId, @Param("productoIds") Collection<Long> productoIds);
++
++    @Query("SELECT i.stock FROM InventarioSucursal i WHERE i.producto.id = :productoId AND i.sucursal.id = :sucursalId")
++    Optional<Double> stockActual(@Param("productoId") Long productoId, @Param("sucursalId") Long sucursalId);
++
++    /** Crea la fila con stock 0 si no existe (seguro ante concurrencia gracias a la restricción única). */
++    @Modifying
++    @Query(value = "INSERT IGNORE INTO inventario_sucursal (producto_id, sucursal_id, stock, stock_critico) " +
++                   "VALUES (:productoId, :sucursalId, 0, 0)", nativeQuery = true)
++    void crearFilaSiNoExiste(@Param("productoId") Long productoId, @Param("sucursalId") Long sucursalId);
++
++    /** Suma (o resta) sin límite: empresas que permiten stock negativo, y todas las entradas. */
++    @Modifying
++    @Query("UPDATE InventarioSucursal i SET i.stock = i.stock + :delta " +
++           "WHERE i.producto.id = :productoId AND i.sucursal.id = :sucursalId")
++    int aplicarDelta(@Param("productoId") Long productoId, @Param("sucursalId") Long sucursalId, @Param("delta") double delta);
++
++    /** Resta atómica que NO deja el stock bajo cero: devuelve 0 filas si no alcanza. */
++    @Modifying
++    @Query("UPDATE InventarioSucursal i SET i.stock = i.stock + :delta " +
++           "WHERE i.producto.id = :productoId AND i.sucursal.id = :sucursalId AND i.stock + :delta >= -0.000001")
++    int aplicarDeltaConPiso(@Param("productoId") Long productoId, @Param("sucursalId") Long sucursalId, @Param("delta") double delta);
++
++    /** Fija el stock a un valor (conteo físico). */
++    @Modifying
++    @Query("UPDATE InventarioSucursal i SET i.stock = :valor " +
++           "WHERE i.producto.id = :productoId AND i.sucursal.id = :sucursalId")
++    int fijarStock(@Param("productoId") Long productoId, @Param("sucursalId") Long sucursalId, @Param("valor") double valor);
++
++    // Valorización (costo si existe, si no precio de venta)
++    @Query("SELECT COALESCE(SUM(i.stock * COALESCE(i.producto.costo, i.producto.precio)), 0.0) " +
++           "FROM InventarioSucursal i WHERE i.sucursal.empresa.id = :empresaId AND i.producto.activo = true AND i.stock > 0")
++    Double valorInventarioEmpresa(@Param("empresaId") Long empresaId);
++}
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoInventarioRepository.java b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoInventarioRepository.java
+new file mode 100644
+index 0000000..c7ba1cf
+--- /dev/null
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoInventarioRepository.java
+@@ -0,0 +1,25 @@
++package com.posbarlacteo.PosBarLacteo.repository;
++
++import org.springframework.data.domain.Page;
++import org.springframework.data.domain.Pageable;
++import org.springframework.data.jpa.repository.EntityGraph;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++import org.springframework.stereotype.Repository;
++
++import com.posbarlacteo.PosBarLacteo.model.MovimientoInventario;
++
++@Repository
++public interface MovimientoInventarioRepository extends JpaRepository<MovimientoInventario, Long> {
++
++    @EntityGraph(attributePaths = {"producto", "sucursal"})
++    @Query("SELECT m FROM MovimientoInventario m WHERE m.empresa.id = :empresaId " +
++           "AND (:sucursalId IS NULL OR m.sucursal.id = :sucursalId) " +
++           "AND (:productoId IS NULL OR m.producto.id = :productoId) " +
++           "ORDER BY m.id DESC")
++    Page<MovimientoInventario> buscar(@Param("empresaId") Long empresaId,
++                                      @Param("sucursalId") Long sucursalId,
++                                      @Param("productoId") Long productoId,
++                                      Pageable pageable);
++}
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ProductoRepository.java b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ProductoRepository.java
+index 14cee2e..44ac3e2 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ProductoRepository.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ProductoRepository.java
+@@ -29,11 +29,4 @@ public interface ProductoRepository extends JpaRepository<Producto, Long> {
+     // Agregamos EntityGraph aquí también para optimizar el filtro por categoría
+     @EntityGraph(attributePaths = {"categoria", "empresa"})
+     Page<Producto> findByActivoTrueAndCategoriaIdAndEmpresaId(Long categoriaId, Long empresaId, Pageable pageable);
+-    
+-    // Calcula el valor del inventario solo de esa empresa
+-    @Query("SELECT COALESCE(SUM(p.stock * p.precio), 0.0) FROM Producto p WHERE p.activo = true AND p.empresa.id = :empresaId")
+-    Double calcularValorTotalInventarioPorEmpresa(@Param("empresaId") Long empresaId);
+-
+-    @Query("SELECT COALESCE(SUM(p.precio * p.stock), 0.0) FROM Producto p WHERE p.activo = true AND p.empresa.id = :empresaId")
+-    Double calcularValorTotalInventario(@Param("empresaId") Long empresaId);
+-}
+\ No newline at end of file
++}
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/repository/SucursalRepository.java b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/SucursalRepository.java
+index ee665d2..262c160 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/repository/SucursalRepository.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/SucursalRepository.java
+@@ -9,4 +9,6 @@ import com.posbarlacteo.PosBarLacteo.model.Sucursal;
+ public interface SucursalRepository extends JpaRepository<Sucursal, Long> {
+ 
+     java.util.Optional<Sucursal> findByIdAndEmpresaId(Long id, Long empresaId);
++
++    java.util.List<Sucursal> findByEmpresaIdAndActivoTrueOrderByIdAsc(Long empresaId);
+ }
+\ No newline at end of file
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/service/InventarioService.java b/src/main/java/com/posbarlacteo/PosBarLacteo/service/InventarioService.java
+new file mode 100644
+index 0000000..cbf5f17
+--- /dev/null
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/service/InventarioService.java
+@@ -0,0 +1,226 @@
++package com.posbarlacteo.PosBarLacteo.service;
++
++import java.time.format.DateTimeFormatter;
++import java.util.Collection;
++import java.util.HashMap;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
++import org.springframework.data.domain.Page;
++import org.springframework.data.domain.PageRequest;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++import com.posbarlacteo.PosBarLacteo.exception.AccesoDenegadoException;
++import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
++import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
++import com.posbarlacteo.PosBarLacteo.model.Empresa;
++import com.posbarlacteo.PosBarLacteo.model.MovimientoInventario;
++import com.posbarlacteo.PosBarLacteo.model.Producto;
++import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
++import com.posbarlacteo.PosBarLacteo.repository.InventarioSucursalRepository;
++import com.posbarlacteo.PosBarLacteo.repository.MovimientoInventarioRepository;
++import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
++import com.posbarlacteo.PosBarLacteo.repository.SucursalRepository;
++import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
++
++/**
++ * Único punto donde cambia el stock. Catálogo por empresa, stock por sucursal.
++ * Cada cambio es atómico en la base (UPDATE condicionado) y deja una fila en el historial.
++ */
++@Service
++public class InventarioService {
++
++    private static final DateTimeFormatter FECHA = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
++
++    private final InventarioSucursalRepository inventario;
++    private final MovimientoInventarioRepository movimientos;
++    private final ProductoRepository productos;
++    private final SucursalRepository sucursales;
++    private final EmpresaRepository empresas;
++
++    public InventarioService(InventarioSucursalRepository inventario, MovimientoInventarioRepository movimientos,
++                             ProductoRepository productos, SucursalRepository sucursales, EmpresaRepository empresas) {
++        this.inventario = inventario;
++        this.movimientos = movimientos;
++        this.productos = productos;
++        this.sucursales = sucursales;
++        this.empresas = empresas;
++    }
++
++    // ---------- política de la empresa ----------
++
++    /** null (empresas anteriores a esta política) se trata como "permitido", que era el comportamiento histórico. */
++    @Transactional(readOnly = true)
++    public boolean permiteStockNegativo(Long empresaId) {
++        return empresas.findById(empresaId)
++                .map(e -> e.getPermiteStockNegativo() == null || e.getPermiteStockNegativo())
++                .orElse(true);
++    }
++
++    @Transactional
++    public void definirPermiteStockNegativo(Long empresaId, boolean valor) {
++        Empresa e = empresas.findById(empresaId)
++                .orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada."));
++        e.setPermiteStockNegativo(valor);
++        empresas.save(e);
++    }
++
++    // ---------- sucursal efectiva ----------
++
++    /** Vendedor: siempre su sucursal. Admin: la suya o cualquiera de SU empresa. */
++    public Long resolverSucursal(AuthPrincipal p, Long solicitada) {
++        if (solicitada == null || solicitada.equals(p.sucursalId())) {
++            if (p.sucursalId() == null) {
++                throw new NegocioException("Tu usuario no tiene una sucursal asignada.");
++            }
++            return p.sucursalId();
++        }
++        if (!p.esAdmin()) {
++            throw new AccesoDenegadoException("No puedes ver el inventario de otra sucursal.");
++        }
++        return sucursales.findByIdAndEmpresaId(solicitada, p.empresaId())
++                .orElseThrow(() -> new NegocioException("La sucursal no existe."))
++                .getId();
++    }
++
++    // ---------- lectura ----------
++
++    /** Completa Producto.stock con el stock de esa sucursal (0 si nunca tuvo movimiento). */
++    @Transactional(readOnly = true)
++    public void poblarStock(Collection<Producto> lista, Long sucursalId) {
++        if (lista.isEmpty()) return;
++        List<Long> ids = lista.stream().map(Producto::getId).toList();
++        Map<Long, Double> mapa = new HashMap<>();
++        for (Object[] fila : inventario.stocksDe(sucursalId, ids)) {
++            mapa.put((Long) fila[0], (Double) fila[1]);
++        }
++        lista.forEach(pr -> pr.setStock(mapa.getOrDefault(pr.getId(), 0.0)));
++    }
++
++    // ---------- escritura ----------
++
++    /**
++     * Descuenta lo consumido por una venta. consumo: productoId → cantidad (ya expandida por recetas).
++     * Se procesa en orden de id para evitar interbloqueos entre ventas simultáneas.
++     */
++    @Transactional
++    public void descontarVenta(Long empresaId, Long sucursalId, Long ventaId, String usuario,
++                               Map<Long, Double> consumo, Map<Long, String> nombres) {
++        boolean permiteNeg = permiteStockNegativo(empresaId);
++        new java.util.TreeMap<>(consumo).forEach((productoId, cantidad) ->
++                aplicar(empresaId, sucursalId, productoId, nombres.get(productoId), -cantidad, permiteNeg,
++                        MovimientoInventario.VENTA, "Venta N° " + ventaId, usuario, ventaId));
++    }
++
++    /** Stock inicial al crear un producto (no pasa por la política: es una carga, siempre positiva). */
++    @Transactional
++    public void cargarStockInicial(AuthPrincipal p, Producto producto, double cantidad) {
++        if (cantidad <= 0) return;
++        Long sucursalId = resolverSucursal(p, null);
++        aplicar(p.empresaId(), sucursalId, producto.getId(), producto.getDescripcion(), cantidad, true,
++                MovimientoInventario.INICIAL, "Stock inicial", p.usuario(), null);
++    }
++
++    /** Movimiento manual: ENTRADA (+), MERMA (−) o AJUSTE (cantidad = conteo físico). Devuelve el stock resultante. */
++    @Transactional
++    public double registrarManual(AuthPrincipal p, Long sucursalSolicitada, Long productoId,
++                                  String tipo, double cantidad, String motivo) {
++        if (Double.isNaN(cantidad) || Double.isInfinite(cantidad)) {
++            throw new NegocioException("La cantidad no es válida.");
++        }
++        Producto producto = productos.findByIdAndEmpresaId(productoId, p.empresaId())
++                .orElseThrow(() -> new NegocioException("El producto no existe."));
++        Long sucursalId = resolverSucursal(p, sucursalSolicitada);
++        String t = tipo == null ? "" : tipo.trim().toUpperCase();
++        String nota = motivo == null || motivo.isBlank() ? null : motivo.trim();
++
++        switch (t) {
++            case MovimientoInventario.ENTRADA -> {
++                if (cantidad <= 0) throw new NegocioException("La cantidad de la entrada debe ser mayor a cero.");
++                return aplicar(p.empresaId(), sucursalId, productoId, producto.getDescripcion(), cantidad, true,
++                        t, nota != null ? nota : "Ingreso de mercadería", p.usuario(), null);
++            }
++            case MovimientoInventario.MERMA -> {
++                if (cantidad <= 0) throw new NegocioException("La cantidad de la merma debe ser mayor a cero.");
++                if (nota == null) throw new NegocioException("Indica el motivo de la merma.");
++                return aplicar(p.empresaId(), sucursalId, productoId, producto.getDescripcion(), -cantidad,
++                        permiteStockNegativo(p.empresaId()), t, nota, p.usuario(), null);
++            }
++            case MovimientoInventario.AJUSTE -> {
++                if (cantidad < 0) throw new NegocioException("El conteo físico no puede ser negativo.");
++                if (nota == null) throw new NegocioException("Indica el motivo del ajuste.");
++                inventario.crearFilaSiNoExiste(productoId, sucursalId);
++                double antes = inventario.stockActual(productoId, sucursalId).orElse(0.0);
++                inventario.fijarStock(productoId, sucursalId, cantidad);
++                guardarMovimiento(p.empresaId(), sucursalId, productoId, t, cantidad - antes, cantidad, nota, p.usuario(), null);
++                return cantidad;
++            }
++            default -> throw new NegocioException("Tipo de movimiento inválido. Usa ENTRADA, MERMA o AJUSTE.");
++        }
++    }
++
++    // ---------- historial ----------
++
++    @Transactional(readOnly = true)
++    public Map<String, Object> listarMovimientos(AuthPrincipal p, Long sucursalSolicitada, Long productoId,
++                                                 int page, int size) {
++        // Admin sin filtro de sucursal ve todas las de su empresa
++        Long filtroSucursal = sucursalSolicitada == null && p.esAdmin() ? null : resolverSucursal(p, sucursalSolicitada);
++        Page<MovimientoInventario> pagina = movimientos.buscar(p.empresaId(), filtroSucursal, productoId,
++                PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 200)));
++
++        List<Map<String, Object>> filas = pagina.getContent().stream().map(m -> {
++            Map<String, Object> f = new LinkedHashMap<>();
++            f.put("id", m.getId());
++            f.put("fecha", FECHA.format(m.getFechaHora()));
++            f.put("tipo", m.getTipo());
++            f.put("cantidad", m.getCantidad());
++            f.put("stockResultante", m.getStockResultante());
++            f.put("motivo", m.getMotivo());
++            f.put("producto", m.getProducto().getDescripcion());
++            f.put("sucursal", m.getSucursal().getNombre());
++            f.put("usuario", m.getUsuarioNombre());
++            return f;
++        }).toList();
++
++        Map<String, Object> r = new LinkedHashMap<>();
++        r.put("content", filas);
++        r.put("totalPages", pagina.getTotalPages());
++        r.put("totalElements", pagina.getTotalElements());
++        return r;
++    }
++
++    // ---------- núcleo atómico ----------
++
++    private double aplicar(Long empresaId, Long sucursalId, Long productoId, String nombre, double delta,
++                           boolean permiteNeg, String tipo, String motivo, String usuario, Long ventaId) {
++        inventario.crearFilaSiNoExiste(productoId, sucursalId);
++        int filas = (delta >= 0 || permiteNeg)
++                ? inventario.aplicarDelta(productoId, sucursalId, delta)
++                : inventario.aplicarDeltaConPiso(productoId, sucursalId, delta);
++        if (filas == 0) {
++            throw new NegocioException("Stock insuficiente de \"" + (nombre != null ? nombre : productoId)
++                    + "\" en esta sucursal.");
++        }
++        double nuevo = inventario.stockActual(productoId, sucursalId).orElse(0.0);
++        guardarMovimiento(empresaId, sucursalId, productoId, tipo, delta, nuevo, motivo, usuario, ventaId);
++        return nuevo;
++    }
++
++    private void guardarMovimiento(Long empresaId, Long sucursalId, Long productoId, String tipo, double delta,
++                                   double stockResultante, String motivo, String usuario, Long ventaId) {
++        MovimientoInventario m = new MovimientoInventario();
++        m.setEmpresa(empresas.getReferenceById(empresaId));
++        m.setSucursal(sucursales.getReferenceById(sucursalId));
++        m.setProducto(productos.getReferenceById(productoId));
++        m.setTipo(tipo);
++        m.setCantidad(delta);
++        m.setStockResultante(stockResultante);
++        m.setMotivo(motivo);
++        m.setUsuarioNombre(usuario);
++        m.setVentaId(ventaId);
++        movimientos.save(m);
++    }
++}
+diff --git a/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java b/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java
+index 3ca3979..00b644b 100644
+--- a/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java
++++ b/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java
+@@ -2,7 +2,9 @@ package com.posbarlacteo.PosBarLacteo.service;
+ 
+ import java.math.BigDecimal;
+ import java.util.ArrayList;
++import java.util.HashMap;
+ import java.util.List;
++import java.util.Map;
+ 
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+@@ -40,11 +42,12 @@ public class VentaService {
+     private final UsuarioRepository usuarioRepository;
+     private final ClienteRepository clienteRepository;
+     private final ValeCreditoPdfService valeCreditoPdfService;
++    private final InventarioService inventarioService;
+ 
+     public VentaService(ProductoRepository productoRepository, RecetaRepository recetaRepository,
+                         VentaRepository ventaRepository, TurnoCajaRepository turnoCajaRepository,
+                         UsuarioRepository usuarioRepository, ClienteRepository clienteRepository,
+-                        ValeCreditoPdfService valeCreditoPdfService) {
++                        ValeCreditoPdfService valeCreditoPdfService, InventarioService inventarioService) {
+         this.productoRepository = productoRepository;
+         this.recetaRepository = recetaRepository;
+         this.ventaRepository = ventaRepository;
+@@ -52,6 +55,7 @@ public class VentaService {
+         this.usuarioRepository = usuarioRepository;
+         this.clienteRepository = clienteRepository;
+         this.valeCreditoPdfService = valeCreditoPdfService;
++        this.inventarioService = inventarioService;
+     }
+ 
+     /**
+@@ -86,6 +90,8 @@ public class VentaService {
+         venta.setSucursal(usuario.getSucursal());
+ 
+         List<VentaDetalle> detalles = new ArrayList<>();
++        Map<Long, Double> consumo = new HashMap<>();
++        Map<Long, String> nombres = new HashMap<>();
+         double total = 0.0;
+ 
+         for (ItemVenta item : items) {
+@@ -102,15 +108,16 @@ public class VentaService {
+                 throw new NegocioException("\"" + producto.getDescripcion() + "\" es un insumo y no se vende directamente.");
+             }
+ 
++            // Qué se consume realmente: el producto, o sus insumos si tiene receta
+             List<Receta> ingredientes = recetaRepository.findByProductoPrincipalId(producto.getId());
+             if (ingredientes.isEmpty()) {
+-                producto.setStock(producto.getStock() - item.getCantidad());
+-                productoRepository.save(producto);
++                consumo.merge(producto.getId(), item.getCantidad(), Double::sum);
++                nombres.put(producto.getId(), producto.getDescripcion());
+             } else {
+                 for (Receta receta : ingredientes) {
+                     Producto insumo = receta.getInsumo();
+-                    insumo.setStock(insumo.getStock() - receta.getCantidadUsada() * item.getCantidad());
+-                    productoRepository.save(insumo);
++                    consumo.merge(insumo.getId(), receta.getCantidadUsada() * item.getCantidad(), Double::sum);
++                    nombres.put(insumo.getId(), insumo.getDescripcion());
+                 }
+             }
+ 
+@@ -147,6 +154,11 @@ public class VentaService {
+         venta.setDetalles(detalles);
+         ventaRepository.save(venta);
+ 
++        // Stock de la sucursal de la venta, atómico y con historial; si no alcanza (y la empresa no permite
++        // stock negativo) lanza NegocioException y TODA la venta se revierte.
++        inventarioService.descontarVenta(p.empresaId(), usuario.getSucursal().getId(), venta.getId(),
++                p.usuario(), consumo, nombres);
++
+         BigDecimal monto = BigDecimal.valueOf(totalServidor);
+         if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {
+             turno.setVentasEfectivo(nz(turno.getVentasEfectivo()).add(monto));

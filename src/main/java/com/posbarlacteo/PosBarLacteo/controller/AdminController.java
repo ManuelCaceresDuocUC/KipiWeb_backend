@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
+import com.posbarlacteo.PosBarLacteo.repository.InventarioSucursalRepository;
 import com.posbarlacteo.PosBarLacteo.repository.VentaRepository;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 
@@ -24,11 +24,11 @@ import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 public class AdminController {
 
     private final VentaRepository ventaRepository;
-    private final ProductoRepository productoRepository;
+    private final InventarioSucursalRepository inventarioRepository;
 
-    public AdminController(VentaRepository ventaRepository, ProductoRepository productoRepository) {
+    public AdminController(VentaRepository ventaRepository, InventarioSucursalRepository inventarioRepository) {
         this.ventaRepository = ventaRepository;
-        this.productoRepository = productoRepository;
+        this.inventarioRepository = inventarioRepository;
     }
 
     // ==========================================
@@ -50,7 +50,7 @@ public class AdminController {
         Double ventasHoy = ventaRepository.sumarVentasDelDia(empresaId, inicioHoy, finHoy);
         Double ventasMes = ventaRepository.sumarVentasDelMes(empresaId, inicioMes);
         Double ticketPromedio = ventaRepository.obtenerTicketPromedioDelDia(empresaId, inicioHoy, finHoy);
-        Double costoInventario = productoRepository.calcularValorTotalInventario(empresaId);
+        Double costoInventario = inventarioRepository.valorInventarioEmpresa(empresaId);
         
         // Validamos nulos por si no hay ventas aún
         ventasHoy = (ventasHoy != null) ? ventasHoy : 0.0;

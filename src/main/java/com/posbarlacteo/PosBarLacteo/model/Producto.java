@@ -16,6 +16,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -46,8 +47,19 @@ public class Producto {
     @Column(nullable = false)
     private Double precio;
 
-    @Column(nullable = false)
+    // LEGADO: columna "stock" original (stock global). Ya no se usa: el stock real vive en inventario_sucursal.
+    // Se conserva (siempre 0) porque la columna es NOT NULL; la migración SQL la lee una vez.
+    @JsonIgnore
+    @Column(name = "stock", nullable = false)
+    private Double stockLegacy = 0.0;
+
+    // Stock de la sucursal consultada: se completa en cada respuesta, no se guarda aquí.
+    @Transient
     private Double stock;
+
+    // Costo de compra unitario (opcional). Sirve para valorizar el inventario.
+    @Column(name = "costo")
+    private Double costo;
 
     @Column(name = "stock_critico")
     private Double stockCritico;
