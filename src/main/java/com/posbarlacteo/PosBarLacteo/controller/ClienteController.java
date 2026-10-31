@@ -1,12 +1,16 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -19,11 +23,14 @@ import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
 import com.posbarlacteo.PosBarLacteo.model.Cliente;
 import com.posbarlacteo.PosBarLacteo.model.Empresa;
+import com.posbarlacteo.PosBarLacteo.model.MovimientoCliente;
 import com.posbarlacteo.PosBarLacteo.repository.ClienteRepository;
 import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
+import com.posbarlacteo.PosBarLacteo.repository.MovimientoClienteRepository;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 import com.posbarlacteo.PosBarLacteo.service.CajaService;
+import com.posbarlacteo.PosBarLacteo.service.CuentaClienteService;
 import com.posbarlacteo.PosBarLacteo.service.ValeCreditoPdfService;
 
 /** Todos los clientes pertenecen a la empresa del token; ningún endpoint recibe empresaId. */
@@ -35,13 +42,19 @@ public class ClienteController {
     private final EmpresaRepository empresaRepository;
     private final CajaService cajaService;
     private final ValeCreditoPdfService valeCreditoPdfService;
+    private final CuentaClienteService cuentaClienteService;
+    private final MovimientoClienteRepository movimientoClienteRepository;
 
     public ClienteController(ClienteRepository clienteRepository, EmpresaRepository empresaRepository,
-                             CajaService cajaService, ValeCreditoPdfService valeCreditoPdfService) {
+                             CajaService cajaService, ValeCreditoPdfService valeCreditoPdfService,
+                             CuentaClienteService cuentaClienteService,
+                             MovimientoClienteRepository movimientoClienteRepository) {
         this.clienteRepository = clienteRepository;
         this.empresaRepository = empresaRepository;
         this.cajaService = cajaService;
         this.valeCreditoPdfService = valeCreditoPdfService;
+        this.cuentaClienteService = cuentaClienteService;
+        this.movimientoClienteRepository = movimientoClienteRepository;
     }
 
     @PostMapping
@@ -86,18 +99,19 @@ public class ClienteController {
         return ResponseEntity.ok(clientes);
     }
 
-    /** Solo ADMIN (ver SecurityConfig). */
+    /** Solo ADMIN (ver SecurityConfig). Deja un ajuste en el estado de cuenta de cada cliente afectado. */
     @PostMapping("/reiniciar-creditos")
     @Transactional
     public ResponseEntity<?> reiniciarCreditos() {
         AuthPrincipal p = SecurityUtils.actual();
         List<Cliente> clientes = clienteRepository.findByEmpresaId(p.empresaId());
         for (Cliente c : clientes) {
-            if (c.getDeudaActual() != null && c.getDeudaActual() > 0) {
-                c.setDeudaActual(0.0);
+            double deuda = c.getDeudaActual() != null ? c.getDeudaActual() : 0.0;
+            if (deuda > 0 && clienteRepository.abonarDeuda(c.getId(), p.empresaId(), deuda) > 0) {
+                cuentaClienteService.registrar(c, p, MovimientoCliente.AJUSTE, -deuda, null, null,
+                        "Reinicio de créditos por el administrador");
             }
         }
-        clienteRepository.saveAll(clientes);
         return ResponseEntity.ok(Map.of("message", "Todos los créditos han sido reiniciados a 0 exitosamente."));
     }
 
@@ -129,24 +143,93 @@ public class ClienteController {
         if (monto <= 0 || Double.isNaN(monto) || Double.isInfinite(monto)) {
             throw new NegocioException("El monto del abono debe ser mayor a 0.");
         }
-        double deuda = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
-        if (monto > deuda) {
-            throw new NegocioException("El monto del abono no puede ser mayor a la deuda actual.");
-        }
+        double deudaAntes = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
         Object mp = payload.get("metodoPago");
         String metodoPago = mp != null ? mp.toString().toUpperCase() : "EFECTIVO";
 
         // Primero la caja: si no hay turno abierto, falla antes de tocar la deuda
-        cajaService.registrarAbono(p, BigDecimal.valueOf(monto), metodoPago);
+        cajaService.registrarAbono(p, BigDecimal.valueOf(monto), metodoPago, cliente.getId(), cliente.getNombre());
 
-        cliente.setDeudaActual(deuda - monto);
-        Cliente actualizado = clienteRepository.save(cliente);
+        // Atómico: solo descuenta si la deuda actual alcanza (si no, se revierte también el registro de caja)
+        if (clienteRepository.abonarDeuda(cliente.getId(), p.empresaId(), monto) == 0) {
+            throw new NegocioException("El monto del abono no puede ser mayor a la deuda actual.");
+        }
+        cuentaClienteService.registrar(cliente, p, MovimientoCliente.ABONO, -monto, null, metodoPago, "Abono del cliente");
 
-        String local = actualizado.getEmpresa() != null ? actualizado.getEmpresa().getRazonSocial() : "Local";
+        double saldo = clienteRepository.saldoActual(cliente.getId(), p.empresaId());
+        cliente.setDeudaActual(saldo);
+
+        String local = cliente.getEmpresa() != null ? cliente.getEmpresa().getRazonSocial() : "Local";
         valeCreditoPdfService.generarGuardarYImprimirAbono(
-                actualizado.getNombre(), actualizado.getRut(), monto, deuda,
-                actualizado.getDeudaActual(), metodoPago, local);
+                cliente.getNombre(), cliente.getRut(), monto, deudaAntes,
+                saldo, metodoPago, local);
 
-        return ResponseEntity.ok(actualizado);
+        return ResponseEntity.ok(cliente);
+    }
+
+    /** Estado de cuenta: resumen del cliente y sus movimientos (cargos, abonos, anulaciones, ajustes). */
+    @GetMapping("/{id}/movimientos")
+    @Transactional(readOnly = true)
+    public Map<String, Object> estadoDeCuenta(@PathVariable Long id,
+                                              @RequestParam(defaultValue = "0") int page,
+                                              @RequestParam(defaultValue = "30") int size) {
+        AuthPrincipal p = SecurityUtils.actual();
+        Cliente c = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
+        Page<MovimientoCliente> pagina = movimientoClienteRepository.porCliente(
+                id, p.empresaId(), PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)));
+
+        double limite = c.getLimiteCredito() != null ? c.getLimiteCredito() : 0.0;
+        double deuda = c.getDeudaActual() != null ? c.getDeudaActual() : 0.0;
+
+        Map<String, Object> cliente = new LinkedHashMap<>();
+        cliente.put("id", c.getId());
+        cliente.put("nombre", c.getNombre());
+        cliente.put("rut", c.getRut());
+        cliente.put("telefono", c.getTelefono());
+        cliente.put("email", c.getEmail());
+        cliente.put("limiteCredito", limite);
+        cliente.put("deudaActual", deuda);
+        cliente.put("disponible", Math.max(0, limite - deuda));
+
+        List<Map<String, Object>> filas = pagina.getContent().stream().map(m -> {
+            Map<String, Object> f = new LinkedHashMap<>();
+            f.put("id", m.getId());
+            f.put("fecha", m.getFechaHora().toString());
+            f.put("tipo", m.getTipo());
+            f.put("monto", m.getMonto());
+            f.put("saldoResultante", m.getSaldoResultante());
+            f.put("ventaId", m.getVentaId());
+            f.put("metodoPago", m.getMetodoPago());
+            f.put("motivo", m.getMotivo());
+            f.put("usuario", m.getUsuarioNombre());
+            return f;
+        }).toList();
+
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("cliente", cliente);
+        r.put("content", filas);
+        r.put("totalPages", pagina.getTotalPages());
+        r.put("totalElements", pagina.getTotalElements());
+        return r;
+    }
+
+    /** Solo ADMIN (ver SecurityConfig): límite de crédito, teléfono y correo del cliente. */
+    @PatchMapping("/{id}")
+    @Transactional
+    public ResponseEntity<?> actualizarCliente(@PathVariable Long id, @RequestBody Cliente body) {
+        AuthPrincipal p = SecurityUtils.actual();
+        Cliente c = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
+        if (body.getLimiteCredito() != null) {
+            double limite = body.getLimiteCredito();
+            if (limite < 0 || Double.isNaN(limite) || Double.isInfinite(limite)) {
+                throw new NegocioException("El límite de crédito no es válido.");
+            }
+            c.setLimiteCredito(limite);
+        }
+        if (body.getTelefono() != null) c.setTelefono(body.getTelefono().trim());
+        if (body.getEmail() != null) c.setEmail(body.getEmail().trim());
+        return ResponseEntity.ok(clienteRepository.save(c));
     }
 }

@@ -31,6 +31,7 @@ public class MovimientoInventario {
     public static final String MERMA = "MERMA";
     public static final String AJUSTE = "AJUSTE";
     public static final String INICIAL = "INICIAL";
+    public static final String ANULACION = "ANULACION";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

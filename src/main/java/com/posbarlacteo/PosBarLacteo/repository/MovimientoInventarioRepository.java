@@ -1,5 +1,7 @@
 package com.posbarlacteo.PosBarLacteo.repository;
 
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -22,4 +24,8 @@ public interface MovimientoInventarioRepository extends JpaRepository<Movimiento
                                       @Param("sucursalId") Long sucursalId,
                                       @Param("productoId") Long productoId,
                                       Pageable pageable);
+
+    @Query("SELECT m FROM MovimientoInventario m WHERE m.empresa.id = :empresaId AND m.ventaId = :ventaId AND m.tipo = :tipo ORDER BY m.id")
+    List<MovimientoInventario> porVenta(@Param("empresaId") Long empresaId, @Param("ventaId") Long ventaId,
+                                        @Param("tipo") String tipo);
 }

@@ -19,6 +19,12 @@ public class PagoRequest {
     private List<ItemVenta> items;
     private Long clienteId;
 
+    /** Formas de pago. Si viene vacío, el endpoint antiguo (efectivo/cobrar/credito) arma una sola línea por el total. */
+    private List<LineaPagoDTO> pagos;
+
+    /** Clave única por intento de venta: un reintento con la misma clave devuelve la venta ya registrada. */
+    private String idempotencyKey;
+
     // Los completa PagoController desde el token; se usan internamente (DteService / voucher).
     private Long usuarioId;
     private Long empresaId;

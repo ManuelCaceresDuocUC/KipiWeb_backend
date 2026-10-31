@@ -2,6 +2,7 @@ package com.posbarlacteo.PosBarLacteo.controller;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -79,5 +80,25 @@ public class CajaController {
     @GetMapping("/historial")
     public ResponseEntity<?> obtenerHistorial() {
         return ResponseEntity.ok(cajaService.obtenerHistorial(SecurityUtils.actual()));
+    }
+
+    /** Movimientos manuales (ingresos, retiros, abonos, anulaciones) del turno abierto del usuario. */
+    @GetMapping("/movimientos")
+    public ResponseEntity<?> movimientosTurnoActual() {
+        try {
+            return ResponseEntity.ok(cajaService.movimientosTurnoActual(SecurityUtils.actual()));
+        } catch (NegocioException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /** Solo ADMIN (ver SecurityConfig): auditoría de cualquier turno de la empresa. */
+    @GetMapping("/historial/{turnoId}/movimientos")
+    public ResponseEntity<?> movimientosDeTurno(@PathVariable Long turnoId) {
+        try {
+            return ResponseEntity.ok(cajaService.movimientosDeTurno(SecurityUtils.actual(), turnoId));
+        } catch (NegocioException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
     }
 }

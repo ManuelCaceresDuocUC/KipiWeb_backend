@@ -1,0 +1,1748 @@
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/CajaController.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/CajaController.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/CajaController.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/CajaController.java	2026-10-31 14:52:28.428371577 -0300
+@@ -2,6 +2,7 @@
+ 
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PathVariable;
+ import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RequestBody;
+ import org.springframework.web.bind.annotation.RequestMapping;
+@@ -80,4 +81,24 @@
+     public ResponseEntity<?> obtenerHistorial() {
+         return ResponseEntity.ok(cajaService.obtenerHistorial(SecurityUtils.actual()));
+     }
++
++    /** Movimientos manuales (ingresos, retiros, abonos, anulaciones) del turno abierto del usuario. */
++    @GetMapping("/movimientos")
++    public ResponseEntity<?> movimientosTurnoActual() {
++        try {
++            return ResponseEntity.ok(cajaService.movimientosTurnoActual(SecurityUtils.actual()));
++        } catch (NegocioException e) {
++            return ResponseEntity.badRequest().body(e.getMessage());
++        }
++    }
++
++    /** Solo ADMIN (ver SecurityConfig): auditoría de cualquier turno de la empresa. */
++    @GetMapping("/historial/{turnoId}/movimientos")
++    public ResponseEntity<?> movimientosDeTurno(@PathVariable Long turnoId) {
++        try {
++            return ResponseEntity.ok(cajaService.movimientosDeTurno(SecurityUtils.actual(), turnoId));
++        } catch (NegocioException e) {
++            return ResponseEntity.badRequest().body(e.getMessage());
++        }
++    }
+ }
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ClienteController.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ClienteController.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ClienteController.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/ClienteController.java	2026-10-31 14:53:31.727049684 -0300
+@@ -1,12 +1,16 @@
+ package com.posbarlacteo.PosBarLacteo.controller;
+ 
+ import java.math.BigDecimal;
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+ 
++import org.springframework.data.domain.PageRequest;
++import org.springframework.data.domain.Page;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.transaction.annotation.Transactional;
+ import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PatchMapping;
+ import org.springframework.web.bind.annotation.PathVariable;
+ import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RequestBody;
+@@ -19,11 +23,14 @@
+ import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
+ import com.posbarlacteo.PosBarLacteo.model.Cliente;
+ import com.posbarlacteo.PosBarLacteo.model.Empresa;
++import com.posbarlacteo.PosBarLacteo.model.MovimientoCliente;
+ import com.posbarlacteo.PosBarLacteo.repository.ClienteRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
++import com.posbarlacteo.PosBarLacteo.repository.MovimientoClienteRepository;
+ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
+ import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+ import com.posbarlacteo.PosBarLacteo.service.CajaService;
++import com.posbarlacteo.PosBarLacteo.service.CuentaClienteService;
+ import com.posbarlacteo.PosBarLacteo.service.ValeCreditoPdfService;
+ 
+ /** Todos los clientes pertenecen a la empresa del token; ningún endpoint recibe empresaId. */
+@@ -35,13 +42,19 @@
+     private final EmpresaRepository empresaRepository;
+     private final CajaService cajaService;
+     private final ValeCreditoPdfService valeCreditoPdfService;
++    private final CuentaClienteService cuentaClienteService;
++    private final MovimientoClienteRepository movimientoClienteRepository;
+ 
+     public ClienteController(ClienteRepository clienteRepository, EmpresaRepository empresaRepository,
+-                             CajaService cajaService, ValeCreditoPdfService valeCreditoPdfService) {
++                             CajaService cajaService, ValeCreditoPdfService valeCreditoPdfService,
++                             CuentaClienteService cuentaClienteService,
++                             MovimientoClienteRepository movimientoClienteRepository) {
+         this.clienteRepository = clienteRepository;
+         this.empresaRepository = empresaRepository;
+         this.cajaService = cajaService;
+         this.valeCreditoPdfService = valeCreditoPdfService;
++        this.cuentaClienteService = cuentaClienteService;
++        this.movimientoClienteRepository = movimientoClienteRepository;
+     }
+ 
+     @PostMapping
+@@ -86,18 +99,19 @@
+         return ResponseEntity.ok(clientes);
+     }
+ 
+-    /** Solo ADMIN (ver SecurityConfig). */
++    /** Solo ADMIN (ver SecurityConfig). Deja un ajuste en el estado de cuenta de cada cliente afectado. */
+     @PostMapping("/reiniciar-creditos")
+     @Transactional
+     public ResponseEntity<?> reiniciarCreditos() {
+         AuthPrincipal p = SecurityUtils.actual();
+         List<Cliente> clientes = clienteRepository.findByEmpresaId(p.empresaId());
+         for (Cliente c : clientes) {
+-            if (c.getDeudaActual() != null && c.getDeudaActual() > 0) {
+-                c.setDeudaActual(0.0);
++            double deuda = c.getDeudaActual() != null ? c.getDeudaActual() : 0.0;
++            if (deuda > 0 && clienteRepository.abonarDeuda(c.getId(), p.empresaId(), deuda) > 0) {
++                cuentaClienteService.registrar(c, p, MovimientoCliente.AJUSTE, -deuda, null, null,
++                        "Reinicio de créditos por el administrador");
+             }
+         }
+-        clienteRepository.saveAll(clientes);
+         return ResponseEntity.ok(Map.of("message", "Todos los créditos han sido reiniciados a 0 exitosamente."));
+     }
+ 
+@@ -129,24 +143,93 @@
+         if (monto <= 0 || Double.isNaN(monto) || Double.isInfinite(monto)) {
+             throw new NegocioException("El monto del abono debe ser mayor a 0.");
+         }
+-        double deuda = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
+-        if (monto > deuda) {
+-            throw new NegocioException("El monto del abono no puede ser mayor a la deuda actual.");
+-        }
++        double deudaAntes = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
+         Object mp = payload.get("metodoPago");
+         String metodoPago = mp != null ? mp.toString().toUpperCase() : "EFECTIVO";
+ 
+         // Primero la caja: si no hay turno abierto, falla antes de tocar la deuda
+-        cajaService.registrarAbono(p, BigDecimal.valueOf(monto), metodoPago);
++        cajaService.registrarAbono(p, BigDecimal.valueOf(monto), metodoPago, cliente.getId(), cliente.getNombre());
++
++        // Atómico: solo descuenta si la deuda actual alcanza (si no, se revierte también el registro de caja)
++        if (clienteRepository.abonarDeuda(cliente.getId(), p.empresaId(), monto) == 0) {
++            throw new NegocioException("El monto del abono no puede ser mayor a la deuda actual.");
++        }
++        cuentaClienteService.registrar(cliente, p, MovimientoCliente.ABONO, -monto, null, metodoPago, "Abono del cliente");
+ 
+-        cliente.setDeudaActual(deuda - monto);
+-        Cliente actualizado = clienteRepository.save(cliente);
++        double saldo = clienteRepository.saldoActual(cliente.getId(), p.empresaId());
++        cliente.setDeudaActual(saldo);
+ 
+-        String local = actualizado.getEmpresa() != null ? actualizado.getEmpresa().getRazonSocial() : "Local";
++        String local = cliente.getEmpresa() != null ? cliente.getEmpresa().getRazonSocial() : "Local";
+         valeCreditoPdfService.generarGuardarYImprimirAbono(
+-                actualizado.getNombre(), actualizado.getRut(), monto, deuda,
+-                actualizado.getDeudaActual(), metodoPago, local);
++                cliente.getNombre(), cliente.getRut(), monto, deudaAntes,
++                saldo, metodoPago, local);
++
++        return ResponseEntity.ok(cliente);
++    }
++
++    /** Estado de cuenta: resumen del cliente y sus movimientos (cargos, abonos, anulaciones, ajustes). */
++    @GetMapping("/{id}/movimientos")
++    @Transactional(readOnly = true)
++    public Map<String, Object> estadoDeCuenta(@PathVariable Long id,
++                                              @RequestParam(defaultValue = "0") int page,
++                                              @RequestParam(defaultValue = "30") int size) {
++        AuthPrincipal p = SecurityUtils.actual();
++        Cliente c = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
++                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
++        Page<MovimientoCliente> pagina = movimientoClienteRepository.porCliente(
++                id, p.empresaId(), PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)));
++
++        double limite = c.getLimiteCredito() != null ? c.getLimiteCredito() : 0.0;
++        double deuda = c.getDeudaActual() != null ? c.getDeudaActual() : 0.0;
+ 
+-        return ResponseEntity.ok(actualizado);
++        Map<String, Object> cliente = new LinkedHashMap<>();
++        cliente.put("id", c.getId());
++        cliente.put("nombre", c.getNombre());
++        cliente.put("rut", c.getRut());
++        cliente.put("telefono", c.getTelefono());
++        cliente.put("email", c.getEmail());
++        cliente.put("limiteCredito", limite);
++        cliente.put("deudaActual", deuda);
++        cliente.put("disponible", Math.max(0, limite - deuda));
++
++        List<Map<String, Object>> filas = pagina.getContent().stream().map(m -> {
++            Map<String, Object> f = new LinkedHashMap<>();
++            f.put("id", m.getId());
++            f.put("fecha", m.getFechaHora().toString());
++            f.put("tipo", m.getTipo());
++            f.put("monto", m.getMonto());
++            f.put("saldoResultante", m.getSaldoResultante());
++            f.put("ventaId", m.getVentaId());
++            f.put("metodoPago", m.getMetodoPago());
++            f.put("motivo", m.getMotivo());
++            f.put("usuario", m.getUsuarioNombre());
++            return f;
++        }).toList();
++
++        Map<String, Object> r = new LinkedHashMap<>();
++        r.put("cliente", cliente);
++        r.put("content", filas);
++        r.put("totalPages", pagina.getTotalPages());
++        r.put("totalElements", pagina.getTotalElements());
++        return r;
++    }
++
++    /** Solo ADMIN (ver SecurityConfig): límite de crédito, teléfono y correo del cliente. */
++    @PatchMapping("/{id}")
++    @Transactional
++    public ResponseEntity<?> actualizarCliente(@PathVariable Long id, @RequestBody Cliente body) {
++        AuthPrincipal p = SecurityUtils.actual();
++        Cliente c = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
++                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
++        if (body.getLimiteCredito() != null) {
++            double limite = body.getLimiteCredito();
++            if (limite < 0 || Double.isNaN(limite) || Double.isInfinite(limite)) {
++                throw new NegocioException("El límite de crédito no es válido.");
++            }
++            c.setLimiteCredito(limite);
++        }
++        if (body.getTelefono() != null) c.setTelefono(body.getTelefono().trim());
++        if (body.getEmail() != null) c.setEmail(body.getEmail().trim());
++        return ResponseEntity.ok(clienteRepository.save(c));
+     }
+ }
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/EmpresaConfigController.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/EmpresaConfigController.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/EmpresaConfigController.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/EmpresaConfigController.java	2026-10-31 14:53:11.604649949 -0300
+@@ -0,0 +1,54 @@
++package com.posbarlacteo.PosBarLacteo.controller;
++
++import java.util.Map;
++
++import org.springframework.transaction.annotation.Transactional;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PutMapping;
++import org.springframework.web.bind.annotation.RequestBody;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
++import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
++import com.posbarlacteo.PosBarLacteo.model.Empresa;
++import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
++import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
++import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
++
++/** Políticas de venta de la empresa. Lectura: cualquier usuario (el POS decide qué medios mostrar). Escritura: ADMIN. */
++@RestController
++@RequestMapping("/api/empresa")
++public class EmpresaConfigController {
++
++    private final EmpresaRepository empresaRepository;
++
++    public EmpresaConfigController(EmpresaRepository empresaRepository) {
++        this.empresaRepository = empresaRepository;
++    }
++
++    @GetMapping("/config-ventas")
++    @Transactional(readOnly = true)
++    public Map<String, Object> leer() {
++        Empresa e = empresa(SecurityUtils.actual());
++        return Map.of("permiteFiado", Boolean.TRUE.equals(e.getPermiteFiado()));
++    }
++
++    @PutMapping("/config-ventas")
++    @Transactional
++    public Map<String, Object> guardar(@RequestBody Map<String, Object> body) {
++        Empresa e = empresa(SecurityUtils.actual());
++        Object valor = body.get("permiteFiado");
++        if (!(valor instanceof Boolean permite)) {
++            throw new NegocioException("Indica si se permite o no el fiado.");
++        }
++        e.setPermiteFiado(permite);
++        empresaRepository.save(e);
++        return Map.of("permiteFiado", permite);
++    }
++
++    private Empresa empresa(AuthPrincipal p) {
++        return empresaRepository.findById(p.empresaId())
++                .orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada."));
++    }
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/PagoController.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/PagoController.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/PagoController.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/PagoController.java	2026-10-31 14:53:11.595652099 -0300
+@@ -1,15 +1,23 @@
+ package com.posbarlacteo.PosBarLacteo.controller;
+ 
++import java.util.LinkedHashMap;
++import java.util.List;
+ import java.util.Map;
++import java.util.Optional;
++import java.util.Set;
++import java.util.stream.Collectors;
+ 
++import org.springframework.dao.DataIntegrityViolationException;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.web.bind.annotation.PostMapping;
+ import org.springframework.web.bind.annotation.RequestBody;
+ import org.springframework.web.bind.annotation.RequestMapping;
+ import org.springframework.web.bind.annotation.RestController;
+ 
++import com.posbarlacteo.PosBarLacteo.dto.LineaPagoDTO;
+ import com.posbarlacteo.PosBarLacteo.dto.PagoRequest;
+ import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
++import com.posbarlacteo.PosBarLacteo.model.PagoVenta;
+ import com.posbarlacteo.PosBarLacteo.model.Venta;
+ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
+ import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+@@ -29,14 +37,22 @@
+         this.dteService = dteService;
+     }
+ 
++    /** Endpoint principal: una o varias formas de pago (request.pagos) que deben sumar el total. */
++    @PostMapping("/venta")
++    public ResponseEntity<?> venta(@RequestBody PagoRequest request) {
++        return cobrar(request, "Venta registrada correctamente");
++    }
++
++    // ---- Endpoints anteriores (un solo medio por el total); se mantienen para versiones antiguas del frontend ----
++
+     @PostMapping("/efectivo")
+     public ResponseEntity<?> procesarEfectivo(@RequestBody PagoRequest request) {
+-        return cobrar(request, "EFECTIVO", "Venta en efectivo registrada correctamente");
++        return cobrar(unSoloMedio(request, PagoVenta.EFECTIVO), "Venta en efectivo registrada correctamente");
+     }
+ 
+     @PostMapping("/cobrar")
+     public ResponseEntity<?> procesarPagoTarjeta(@RequestBody PagoRequest request) {
+-        return cobrar(request, "TARJETA", "Venta con tarjeta registrada correctamente");
++        return cobrar(unSoloMedio(request, PagoVenta.TARJETA), "Venta con tarjeta registrada correctamente");
+     }
+ 
+     @PostMapping("/credito")
+@@ -44,24 +60,61 @@
+         if (request.getClienteId() == null) {
+             throw new NegocioException("El cliente es obligatorio para ventas a crédito.");
+         }
+-        return cobrar(request, "CREDITO", "Venta a crédito registrada exitosamente.");
++        return cobrar(unSoloMedio(request, PagoVenta.CREDITO), "Venta a crédito registrada exitosamente.");
++    }
++
++    private PagoRequest unSoloMedio(PagoRequest request, String metodo) {
++        LineaPagoDTO linea = new LineaPagoDTO();
++        linea.setMetodo(metodo);
++        linea.setMonto((long) request.getMonto());
++        linea.setConfirmado(true);
++        request.setPagos(List.of(linea));
++        return request;
+     }
+ 
+-    private ResponseEntity<?> cobrar(PagoRequest request, String metodo, String mensaje) {
++    private ResponseEntity<?> cobrar(PagoRequest request, String mensaje) {
+         AuthPrincipal p = SecurityUtils.actual();
+         // Identidad siempre desde el token: lo que venga en el cuerpo se pisa
+         request.setEmpresaId(p.empresaId());
+         request.setUsuarioId(p.usuarioId());
+ 
+-        Venta venta = ventaService.procesarVentaCompleta(
+-                request.getItems(), request.getMonto(), metodo, p, request.getClienteId());
++        // Reintento del mismo cobro (corte de red, doble clic): se devuelve la venta ya registrada
++        Optional<Venta> previa = ventaService.buscarPorClave(p, request.getIdempotencyKey());
++        if (previa.isPresent()) {
++            return respuestaDuplicada(previa.get());
++        }
++
++        Venta venta;
++        try {
++            venta = ventaService.procesarVenta(request, p);
++        } catch (DataIntegrityViolationException e) {
++            // Dos intentos simultáneos con la misma clave: gana el primero, el segundo recibe esa venta
++            Optional<Venta> dup = ventaService.buscarPorClave(p, request.getIdempotencyKey());
++            if (dup.isPresent()) {
++                return respuestaDuplicada(dup.get());
++            }
++            throw e;
++        }
+ 
+-        String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, metodo);
++        Set<String> metodos = venta.getPagos().stream().map(PagoVenta::getMetodo).collect(Collectors.toSet());
++        String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, metodos);
++
++        Map<String, Object> cuerpo = new LinkedHashMap<>();
++        cuerpo.put("status", "success");
++        cuerpo.put("message", mensaje);
++        cuerpo.put("ventaId", venta.getId());
++        cuerpo.put("metodoPago", venta.getMetodoPago());
++        cuerpo.put("boletaPdf", base64Pdf == null ? "" : base64Pdf);
++        return ResponseEntity.ok(cuerpo);
++    }
+ 
+-        return ResponseEntity.ok(Map.of(
+-                "status", "success",
+-                "message", mensaje,
+-                "ventaId", venta.getId(),
+-                "boletaPdf", base64Pdf == null ? "" : base64Pdf));
++    private ResponseEntity<?> respuestaDuplicada(Venta venta) {
++        Map<String, Object> cuerpo = new LinkedHashMap<>();
++        cuerpo.put("status", "duplicate");
++        cuerpo.put("message", "Esta venta ya estaba registrada (N° " + venta.getId() + "). No se cobró dos veces.");
++        cuerpo.put("ventaId", venta.getId());
++        cuerpo.put("metodoPago", venta.getMetodoPago());
++        cuerpo.put("boletaPdf", "");
++        return ResponseEntity.ok(cuerpo);
+     }
+ }
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/VentaController.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/VentaController.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/controller/VentaController.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/controller/VentaController.java	2026-10-31 14:53:11.599652100 -0300
+@@ -0,0 +1,29 @@
++package com.posbarlacteo.PosBarLacteo.controller;
++
++import java.util.Map;
++
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RequestBody;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
++import com.posbarlacteo.PosBarLacteo.service.VentaService;
++
++@RestController
++@RequestMapping("/api/ventas")
++public class VentaController {
++
++    private final VentaService ventaService;
++
++    public VentaController(VentaService ventaService) {
++        this.ventaService = ventaService;
++    }
++
++    /** Solo ADMIN (ver SecurityConfig). Body: {"motivo": "..."}. */
++    @PostMapping("/{id}/anular")
++    public Map<String, Object> anular(@PathVariable Long id, @RequestBody Map<String, String> body) {
++        return ventaService.anular(SecurityUtils.actual(), id, body == null ? null : body.get("motivo"));
++    }
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/LineaPagoDTO.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/dto/LineaPagoDTO.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/LineaPagoDTO.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/dto/LineaPagoDTO.java	2026-10-31 14:51:44.169347024 -0300
+@@ -0,0 +1,19 @@
++package com.posbarlacteo.PosBarLacteo.dto;
++
++import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
++
++import lombok.Data;
++
++/** Una forma de pago dentro de la venta: EFECTIVO, TARJETA, TRANSFERENCIA o CREDITO. */
++@Data
++@JsonIgnoreProperties(ignoreUnknown = true)
++public class LineaPagoDTO {
++    private String metodo;
++    private Long monto;
++    /** Solo tarjeta: GETNET / MERCADOPAGO / TRANSBANK. */
++    private String proveedorTarjeta;
++    /** N° de operación de la transferencia o del voucher de tarjeta (opcional). */
++    private String referencia;
++    /** Transferencia: el cajero confirma que el dinero ya llegó a la cuenta. */
++    private Boolean confirmado;
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/PagoRequest.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/dto/PagoRequest.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/PagoRequest.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/dto/PagoRequest.java	2026-10-31 14:51:44.179646903 -0300
+@@ -19,6 +19,12 @@
+     private List<ItemVenta> items;
+     private Long clienteId;
+ 
++    /** Formas de pago. Si viene vacío, el endpoint antiguo (efectivo/cobrar/credito) arma una sola línea por el total. */
++    private List<LineaPagoDTO> pagos;
++
++    /** Clave única por intento de venta: un reintento con la misma clave devuelve la venta ya registrada. */
++    private String idempotencyKey;
++
+     // Los completa PagoController desde el token; se usan internamente (DteService / voucher).
+     private Long usuarioId;
+     private Long empresaId;
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/ResumenCajaDTO.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/dto/ResumenCajaDTO.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/dto/ResumenCajaDTO.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/dto/ResumenCajaDTO.java	2026-10-31 14:52:28.428044392 -0300
+@@ -9,6 +9,7 @@
+     private Double abonosCredito; // ✨ CAMPO AGREGADO
+     private Double retiros;
+     private Double totalEnCaja;
++    private Double ventasTransferencia = 0.0;
+ 
+     public ResumenCajaDTO() {}
+ 
+@@ -54,4 +55,7 @@
+ 
+     public Double getTotalEnCaja() { return totalEnCaja; }
+     public void setTotalEnCaja(Double totalEnCaja) { this.totalEnCaja = totalEnCaja; }
+-}
+\ No newline at end of file
++
++    public Double getVentasTransferencia() { return ventasTransferencia; }
++    public void setVentasTransferencia(Double ventasTransferencia) { this.ventasTransferencia = ventasTransferencia; }
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java	2026-10-31 14:57:34.078168161 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/Empresa.java	2026-10-31 14:50:29.310554601 -0300
+@@ -187,4 +187,16 @@
+     public void setPermiteStockNegativo(Boolean permiteStockNegativo) {
+         this.permiteStockNegativo = permiteStockNegativo;
+     }
++
++    // Fiado (venta a crédito) por empresa. null = deshabilitado: hay que activarlo explícitamente.
++    @Column(name = "permite_fiado")
++    private Boolean permiteFiado;
++
++    public Boolean getPermiteFiado() {
++        return permiteFiado;
++    }
++
++    public void setPermiteFiado(Boolean permiteFiado) {
++        this.permiteFiado = permiteFiado;
++    }
+ }
+\ No newline at end of file
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCaja.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCaja.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCaja.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCaja.java	2026-10-31 14:50:29.321670139 -0300
+@@ -0,0 +1,81 @@
++package com.posbarlacteo.PosBarLacteo.model;
++
++import java.math.BigDecimal;
++import java.time.LocalDateTime;
++
++import com.fasterxml.jackson.annotation.JsonIgnore;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Index;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.PrePersist;
++import jakarta.persistence.Table;
++import lombok.Getter;
++import lombok.Setter;
++
++/** Auditoría de movimientos manuales de caja: ingresos, retiros, abonos de clientes y reversas por anulación. */
++@Entity
++@Table(name = "movimientos_caja", indexes = {
++    @Index(name = "idx_mov_caja_turno", columnList = "turno_id")
++})
++@Getter
++@Setter
++public class MovimientoCaja {
++
++    public static final String INGRESO = "INGRESO";
++    public static final String RETIRO = "RETIRO";
++    public static final String ABONO = "ABONO";
++    public static final String ANULACION = "ANULACION";
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    private Long id;
++
++    @JsonIgnore
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "turno_id", nullable = false)
++    private TurnoCaja turno;
++
++    @JsonIgnore
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "empresa_id", nullable = false)
++    private Empresa empresa;
++
++    @Column(nullable = false, length = 20)
++    private String tipo;
++
++    /** EFECTIVO / TARJETA / TRANSFERENCIA cuando aplica. */
++    @Column(name = "metodo_pago", length = 20)
++    private String metodoPago;
++
++    @Column(nullable = false)
++    private BigDecimal monto;
++
++    @Column(length = 255)
++    private String motivo;
++
++    @Column(name = "usuario_nombre", length = 100)
++    private String usuarioNombre;
++
++    @Column(name = "venta_id")
++    private Long ventaId;
++
++    @Column(name = "cliente_id")
++    private Long clienteId;
++
++    @Column(name = "fecha_hora", nullable = false)
++    private LocalDateTime fechaHora;
++
++    @PrePersist
++    protected void alCrear() {
++        if (fechaHora == null) {
++            fechaHora = LocalDateTime.now();
++        }
++    }
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCliente.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCliente.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCliente.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoCliente.java	2026-10-31 14:50:29.323741137 -0300
+@@ -0,0 +1,80 @@
++package com.posbarlacteo.PosBarLacteo.model;
++
++import java.time.LocalDateTime;
++
++import com.fasterxml.jackson.annotation.JsonIgnore;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.Index;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.PrePersist;
++import jakarta.persistence.Table;
++import lombok.Getter;
++import lombok.Setter;
++
++/** Estado de cuenta del cliente: cada cargo, abono, anulación o ajuste de su deuda. */
++@Entity
++@Table(name = "cliente_movimientos", indexes = {
++    @Index(name = "idx_cli_mov_cliente", columnList = "cliente_id, id")
++})
++@Getter
++@Setter
++public class MovimientoCliente {
++
++    public static final String CARGO = "CARGO";
++    public static final String ABONO = "ABONO";
++    public static final String ANULACION = "ANULACION";
++    public static final String AJUSTE = "AJUSTE";
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    private Long id;
++
++    @JsonIgnore
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "cliente_id", nullable = false)
++    private Cliente cliente;
++
++    @JsonIgnore
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "empresa_id", nullable = false)
++    private Empresa empresa;
++
++    @Column(nullable = false, length = 20)
++    private String tipo;
++
++    /** Con signo: cargo y ajuste al alza suman deuda (+); abono, anulación y ajuste a la baja la reducen (−). */
++    @Column(nullable = false)
++    private Double monto;
++
++    @Column(name = "saldo_resultante", nullable = false)
++    private Double saldoResultante;
++
++    @Column(name = "venta_id")
++    private Long ventaId;
++
++    @Column(name = "metodo_pago", length = 20)
++    private String metodoPago;
++
++    @Column(length = 255)
++    private String motivo;
++
++    @Column(name = "usuario_nombre", length = 100)
++    private String usuarioNombre;
++
++    @Column(name = "fecha_hora", nullable = false)
++    private LocalDateTime fechaHora;
++
++    @PrePersist
++    protected void alCrear() {
++        if (fechaHora == null) {
++            fechaHora = LocalDateTime.now();
++        }
++    }
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoInventario.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoInventario.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoInventario.java	2026-10-31 14:57:34.078339506 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/MovimientoInventario.java	2026-10-31 14:52:07.599948926 -0300
+@@ -31,6 +31,7 @@
+     public static final String MERMA = "MERMA";
+     public static final String AJUSTE = "AJUSTE";
+     public static final String INICIAL = "INICIAL";
++    public static final String ANULACION = "ANULACION";
+ 
+     @Id
+     @GeneratedValue(strategy = GenerationType.IDENTITY)
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/PagoVenta.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/PagoVenta.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/PagoVenta.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/PagoVenta.java	2026-10-31 14:50:29.315642453 -0300
+@@ -0,0 +1,74 @@
++package com.posbarlacteo.PosBarLacteo.model;
++
++import java.time.LocalDateTime;
++
++import com.fasterxml.jackson.annotation.JsonBackReference;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.Table;
++import lombok.Getter;
++import lombok.Setter;
++
++/** Una línea de pago de una venta. Una venta puede tener varias (pago mixto). */
++@Entity
++@Table(name = "pos_ventas_pagos")
++@Getter
++@Setter
++public class PagoVenta {
++
++    public static final String EFECTIVO = "EFECTIVO";
++    public static final String TARJETA = "TARJETA";
++    public static final String TRANSFERENCIA = "TRANSFERENCIA";
++    public static final String CREDITO = "CREDITO";
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    private Long id;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "venta_id", nullable = false)
++    @JsonBackReference("pagos")
++    private Venta venta;
++
++    @Column(nullable = false, length = 20)
++    private String metodo;
++
++    /** Pesos chilenos enteros. */
++    @Column(nullable = false)
++    private Long monto;
++
++    /** GETNET / MERCADOPAGO / TRANSBANK cuando es tarjeta. */
++    @Column(name = "proveedor_tarjeta", length = 20)
++    private String proveedorTarjeta;
++
++    /** N° de operación / referencia de la transferencia o del voucher de la tarjeta. */
++    @Column(length = 100)
++    private String referencia;
++
++    /** El cajero confirmó haber recibido el dinero (transferencia) o la aprobación (tarjeta). */
++    @Column(nullable = false)
++    private boolean confirmado = true;
++
++    @Column(name = "confirmado_por", length = 100)
++    private String confirmadoPor;
++
++    @Column(name = "fecha_confirmacion")
++    private LocalDateTime fechaConfirmacion;
++
++    /** Clave del objeto en el bucket (R2) del comprobante adjunto; se completa en la etapa 3B. */
++    @Column(name = "comprobante_key", length = 255)
++    private String comprobanteKey;
++
++    @Column(name = "comprobante_nombre", length = 255)
++    private String comprobanteNombre;
++
++    @Column(name = "comprobante_tipo", length = 100)
++    private String comprobanteTipo;
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/TurnoCaja.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/TurnoCaja.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/TurnoCaja.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/TurnoCaja.java	2026-10-31 14:50:29.311066729 -0300
+@@ -14,6 +14,7 @@
+ import jakarta.persistence.Table;
+ 
+ @Entity
++@org.hibernate.annotations.DynamicUpdate // solo escribe las columnas modificadas: no pisa totales que cambian por UPDATE atómico
+ @Table(name = "turnos_caja")
+ public class TurnoCaja {
+     
+@@ -42,6 +43,9 @@
+     @Column(name = "ventas_tarjeta")
+     private BigDecimal ventasTarjeta = BigDecimal.ZERO;
+ 
++    @Column(name = "ventas_transferencia")
++    private BigDecimal ventasTransferencia = BigDecimal.ZERO;
++
+     @Column(name = "ventas_credito")
+     private BigDecimal ventasCredito = BigDecimal.ZERO;
+ 
+@@ -92,6 +96,8 @@
+     public void setVentasEfectivo(BigDecimal ventasEfectivo) { this.ventasEfectivo = ventasEfectivo; }
+     public BigDecimal getVentasTarjeta() { return ventasTarjeta; }
+     public void setVentasTarjeta(BigDecimal ventasTarjeta) { this.ventasTarjeta = ventasTarjeta; }
++    public BigDecimal getVentasTransferencia() { return ventasTransferencia; }
++    public void setVentasTransferencia(BigDecimal ventasTransferencia) { this.ventasTransferencia = ventasTransferencia; }
+     public BigDecimal getVentasCredito() { return ventasCredito; }
+     public void setVentasCredito(BigDecimal ventasCredito) { this.ventasCredito = ventasCredito; }
+     public BigDecimal getIngresosExtra() { return ingresosExtra; }
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Venta.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/Venta.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/model/Venta.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/model/Venta.java	2026-10-31 14:50:29.311504881 -0300
+@@ -19,7 +19,9 @@
+ import lombok.Data;
+ 
+ @Entity
+-@Table(name = "pos_ventas")
++@Table(name = "pos_ventas", uniqueConstraints = {
++    @jakarta.persistence.UniqueConstraint(name = "uk_venta_idempotencia", columnNames = {"empresa_id", "idempotency_key"})
++})
+ @Data
+ public class Venta {
+     @Id
+@@ -43,6 +45,31 @@
+     @JsonManagedReference 
+     private List<VentaDetalle> detalles;
+ 
++    /** COMPLETADA (o null en ventas antiguas) | ANULADA */
++    @Column(name = "estado", length = 20)
++    private String estado = "COMPLETADA";
++
++    /** Turno de caja en que se cobró; null en ventas anteriores a esta versión. */
++    @Column(name = "turno_id")
++    private Long turnoId;
++
++    /** Clave enviada por el cliente para que un reintento no duplique la venta. */
++    @Column(name = "idempotency_key", length = 64)
++    private String idempotencyKey;
++
++    @Column(name = "anulada_por", length = 100)
++    private String anuladaPor;
++
++    @Column(name = "fecha_anulacion")
++    private java.time.LocalDateTime fechaAnulacion;
++
++    @Column(name = "motivo_anulacion", length = 255)
++    private String motivoAnulacion;
++
++    @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL)
++    @com.fasterxml.jackson.annotation.JsonManagedReference("pagos")
++    private List<PagoVenta> pagos;
++
+     @PrePersist
+     protected void onCreate() {
+         this.fechaHora = java.time.LocalDateTime.now();
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ClienteRepository.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ClienteRepository.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ClienteRepository.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/ClienteRepository.java	2026-10-31 14:50:51.333178824 -0300
+@@ -4,6 +4,7 @@
+ import java.util.Optional;
+ 
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Modifying;
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.query.Param;
+ 
+@@ -25,4 +26,20 @@
+             @Param("termino") String termino, 
+             @Param("terminoLimpio") String terminoLimpio, 
+             @Param("empresaId") Long empresaId);
+-}
+\ No newline at end of file
++
++    /** Suma deuda SOLO si el nuevo saldo no supera el límite del cliente. Atómico: devuelve 0 si no cabe. */
++    @Modifying
++    @Query("UPDATE Cliente c SET c.deudaActual = COALESCE(c.deudaActual, 0) + :monto " +
++           "WHERE c.id = :id AND c.empresa.id = :empresaId " +
++           "AND COALESCE(c.deudaActual, 0) + :monto <= COALESCE(c.limiteCredito, 0)")
++    int cargarDeudaConLimite(@Param("id") Long id, @Param("empresaId") Long empresaId, @Param("monto") double monto);
++
++    /** Resta deuda solo si alcanza (abonos). Atómico: devuelve 0 si el monto excede la deuda. */
++    @Modifying
++    @Query("UPDATE Cliente c SET c.deudaActual = COALESCE(c.deudaActual, 0) - :monto " +
++           "WHERE c.id = :id AND c.empresa.id = :empresaId AND COALESCE(c.deudaActual, 0) >= :monto")
++    int abonarDeuda(@Param("id") Long id, @Param("empresaId") Long empresaId, @Param("monto") double monto);
++
++    @Query("SELECT COALESCE(c.deudaActual, 0) FROM Cliente c WHERE c.id = :id AND c.empresa.id = :empresaId")
++    Double saldoActual(@Param("id") Long id, @Param("empresaId") Long empresaId);
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoCajaRepository.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoCajaRepository.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoCajaRepository.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoCajaRepository.java	2026-10-31 14:50:51.317150516 -0300
+@@ -0,0 +1,17 @@
++package com.posbarlacteo.PosBarLacteo.repository;
++
++import java.util.List;
++
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++import org.springframework.stereotype.Repository;
++
++import com.posbarlacteo.PosBarLacteo.model.MovimientoCaja;
++
++@Repository
++public interface MovimientoCajaRepository extends JpaRepository<MovimientoCaja, Long> {
++
++    @Query("SELECT m FROM MovimientoCaja m WHERE m.turno.id = :turnoId AND m.empresa.id = :empresaId ORDER BY m.id DESC")
++    List<MovimientoCaja> porTurno(@Param("turnoId") Long turnoId, @Param("empresaId") Long empresaId);
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoClienteRepository.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoClienteRepository.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoClienteRepository.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoClienteRepository.java	2026-10-31 14:50:51.318531602 -0300
+@@ -0,0 +1,18 @@
++package com.posbarlacteo.PosBarLacteo.repository;
++
++import org.springframework.data.domain.Page;
++import org.springframework.data.domain.Pageable;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++import org.springframework.stereotype.Repository;
++
++import com.posbarlacteo.PosBarLacteo.model.MovimientoCliente;
++
++@Repository
++public interface MovimientoClienteRepository extends JpaRepository<MovimientoCliente, Long> {
++
++    @Query("SELECT m FROM MovimientoCliente m WHERE m.cliente.id = :clienteId AND m.empresa.id = :empresaId ORDER BY m.id DESC")
++    Page<MovimientoCliente> porCliente(@Param("clienteId") Long clienteId,
++                                       @Param("empresaId") Long empresaId, Pageable pageable);
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoInventarioRepository.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoInventarioRepository.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoInventarioRepository.java	2026-10-31 14:57:34.078561293 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/MovimientoInventarioRepository.java	2026-10-31 14:50:51.334062878 -0300
+@@ -1,5 +1,7 @@
+ package com.posbarlacteo.PosBarLacteo.repository;
+ 
++import java.util.List;
++
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.EntityGraph;
+@@ -22,4 +24,8 @@
+                                       @Param("sucursalId") Long sucursalId,
+                                       @Param("productoId") Long productoId,
+                                       Pageable pageable);
++
++    @Query("SELECT m FROM MovimientoInventario m WHERE m.empresa.id = :empresaId AND m.ventaId = :ventaId AND m.tipo = :tipo ORDER BY m.id")
++    List<MovimientoInventario> porVenta(@Param("empresaId") Long empresaId, @Param("ventaId") Long ventaId,
++                                        @Param("tipo") String tipo);
+ }
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/PagoVentaRepository.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/PagoVentaRepository.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/PagoVentaRepository.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/PagoVentaRepository.java	2026-10-31 14:50:51.311643760 -0300
+@@ -0,0 +1,17 @@
++package com.posbarlacteo.PosBarLacteo.repository;
++
++import java.util.List;
++
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++import org.springframework.stereotype.Repository;
++
++import com.posbarlacteo.PosBarLacteo.model.PagoVenta;
++
++@Repository
++public interface PagoVentaRepository extends JpaRepository<PagoVenta, Long> {
++
++    @Query("SELECT p FROM PagoVenta p WHERE p.venta.id = :ventaId ORDER BY p.id")
++    List<PagoVenta> porVenta(@Param("ventaId") Long ventaId);
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/TurnoCajaRepository.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/TurnoCajaRepository.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/TurnoCajaRepository.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/TurnoCajaRepository.java	2026-10-31 14:50:51.333789622 -0300
+@@ -4,6 +4,9 @@
+ import java.util.Optional;
+ 
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Modifying;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
+ import org.springframework.stereotype.Repository;
+ 
+ import com.posbarlacteo.PosBarLacteo.model.TurnoCaja;
+@@ -15,4 +18,21 @@
+ 
+     // ✨ NUEVO: Buscar historial por ID de empresa ordenado por ID descendente
+     List<TurnoCaja> findByEmpresaIdOrderByIdDesc(Long empresaId);
+-}
+\ No newline at end of file
++
++    Optional<TurnoCaja> findByIdAndEmpresaId(Long id, Long empresaId);
++
++    /**
++     * Suma (o resta, con valores negativos) a los totales de un turno ABIERTO en una sola sentencia,
++     * sin leer-modificar-escribir. Devuelve 0 si el turno ya no está abierto.
++     */
++    @Modifying
++    @Query("UPDATE TurnoCaja t SET " +
++           "t.ventasEfectivo = COALESCE(t.ventasEfectivo, 0) + :ef, " +
++           "t.ventasTarjeta = COALESCE(t.ventasTarjeta, 0) + :tj, " +
++           "t.ventasTransferencia = COALESCE(t.ventasTransferencia, 0) + :tr, " +
++           "t.ventasCredito = COALESCE(t.ventasCredito, 0) + :cr " +
++           "WHERE t.id = :id AND t.estado = 'ABIERTA'")
++    int sumarVentas(@Param("id") Long id,
++                    @Param("ef") java.math.BigDecimal ef, @Param("tj") java.math.BigDecimal tj,
++                    @Param("tr") java.math.BigDecimal tr, @Param("cr") java.math.BigDecimal cr);
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/VentaRepository.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/VentaRepository.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/repository/VentaRepository.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/repository/VentaRepository.java	2026-10-31 14:50:51.333507582 -0300
+@@ -2,12 +2,16 @@
+ 
+ import java.time.LocalDateTime;
+ import java.util.List;
++import java.util.Optional;
+ 
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Lock;
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.query.Param;
+ 
++import jakarta.persistence.LockModeType;
++
+ import com.posbarlacteo.PosBarLacteo.model.Venta;
+ 
+ public interface VentaRepository extends JpaRepository<Venta, Long> {
+@@ -20,19 +24,29 @@
+     // 📊 CONSULTAS PARA EL PANEL DE CONTROL (ADMINISTRACIÓN) - FILTRADAS
+     // =====================================================================
+     
+-    @Query("SELECT COALESCE(SUM(v.total), 0.0) FROM Venta v WHERE v.empresa.id = :empresaId AND v.fechaHora BETWEEN :inicio AND :fin")
++    @Query("SELECT COALESCE(SUM(v.total), 0.0) FROM Venta v WHERE v.empresa.id = :empresaId AND v.fechaHora BETWEEN :inicio AND :fin AND (v.estado IS NULL OR v.estado <> 'ANULADA')")
+     Double sumarVentasDelDia(@Param("empresaId") Long empresaId, @Param("inicio") LocalDateTime inicio, @Param("fin") LocalDateTime fin);
+ 
+-    @Query("SELECT COALESCE(SUM(v.total), 0.0) FROM Venta v WHERE v.empresa.id = :empresaId AND v.fechaHora >= :inicioMes")
++    @Query("SELECT COALESCE(SUM(v.total), 0.0) FROM Venta v WHERE v.empresa.id = :empresaId AND v.fechaHora >= :inicioMes AND (v.estado IS NULL OR v.estado <> 'ANULADA')")
+     Double sumarVentasDelMes(@Param("empresaId") Long empresaId, @Param("inicioMes") LocalDateTime inicioMes);
+ 
+-    @Query("SELECT COALESCE(AVG(v.total), 0.0) FROM Venta v WHERE v.empresa.id = :empresaId AND v.fechaHora BETWEEN :inicio AND :fin")
++    @Query("SELECT COALESCE(AVG(v.total), 0.0) FROM Venta v WHERE v.empresa.id = :empresaId AND v.fechaHora BETWEEN :inicio AND :fin AND (v.estado IS NULL OR v.estado <> 'ANULADA')")
+     Double obtenerTicketPromedioDelDia(@Param("empresaId") Long empresaId, @Param("inicio") LocalDateTime inicio, @Param("fin") LocalDateTime fin);
+ 
+     @Query("SELECT d.producto.descripcion AS nombre, SUM(d.cantidad) AS total " +
+            "FROM Venta v JOIN v.detalles d " +
+-           "WHERE v.empresa.id = :empresaId AND v.fechaHora >= :desde " +
++           "WHERE v.empresa.id = :empresaId AND v.fechaHora >= :desde AND (v.estado IS NULL OR v.estado <> 'ANULADA') " +
+            "GROUP BY d.producto.descripcion " +
+            "ORDER BY total DESC")
+     List<Object[]> obtenerProductosMasVendidos(@Param("empresaId") Long empresaId, @Param("desde") LocalDateTime desde, Pageable pageable);
+-}
+\ No newline at end of file
++
++    Optional<Venta> findByIdAndEmpresaId(Long id, Long empresaId);
++
++    @Query("SELECT v FROM Venta v WHERE v.empresa.id = :empresaId AND v.idempotencyKey = :clave")
++    Optional<Venta> buscarPorClave(@Param("empresaId") Long empresaId, @Param("clave") String clave);
++
++    /** Bloqueo de escritura: dos anulaciones simultáneas de la misma venta no pueden pasar a la vez. */
++    @Lock(LockModeType.PESSIMISTIC_WRITE)
++    @Query("SELECT v FROM Venta v WHERE v.id = :id AND v.empresa.id = :empresaId")
++    Optional<Venta> buscarConBloqueo(@Param("id") Long id, @Param("empresaId") Long empresaId);
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/security/SecurityConfig.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/security/SecurityConfig.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/security/SecurityConfig.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/security/SecurityConfig.java	2026-10-31 14:53:11.632826187 -0300
+@@ -57,7 +57,10 @@
+ 
+                 // 3. Solo administradores
+                 .requestMatchers("/api/admin/**", "/api/dte/**", "/api/inventario/**", "/api/reportes/**").hasRole("ADMIN")
+-                .requestMatchers(HttpMethod.GET, "/api/caja/historial", "/api/usuarios").hasRole("ADMIN")
++                .requestMatchers(HttpMethod.GET, "/api/caja/historial", "/api/caja/historial/**", "/api/usuarios").hasRole("ADMIN")
++                .requestMatchers(HttpMethod.POST, "/api/ventas/*/anular").hasRole("ADMIN")
++                .requestMatchers(HttpMethod.PUT, "/api/empresa/**").hasRole("ADMIN")
++                .requestMatchers(HttpMethod.PATCH, "/api/clientes/**").hasRole("ADMIN")
+                 .requestMatchers(HttpMethod.POST, "/api/clientes/reiniciar-creditos").hasRole("ADMIN")
+                 // Catálogo: lectura para todos; alta/edición/baja solo administrador
+                 .requestMatchers(HttpMethod.POST, "/api/productos/**", "/api/categorias/**", "/api/recetas/**").hasRole("ADMIN")
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/CajaService.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/CajaService.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/CajaService.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/CajaService.java	2026-10-31 14:52:28.427698652 -0300
+@@ -11,8 +11,10 @@
+ import com.posbarlacteo.PosBarLacteo.dto.MovimientoCajaDTO;
+ import com.posbarlacteo.PosBarLacteo.dto.ResumenCajaDTO;
+ import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
++import com.posbarlacteo.PosBarLacteo.model.MovimientoCaja;
+ import com.posbarlacteo.PosBarLacteo.model.TurnoCaja;
+ import com.posbarlacteo.PosBarLacteo.model.Usuario;
++import com.posbarlacteo.PosBarLacteo.repository.MovimientoCajaRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.TurnoCajaRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.UsuarioRepository;
+ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
+@@ -25,10 +27,13 @@
+ 
+     private final TurnoCajaRepository turnoCajaRepository;
+     private final UsuarioRepository usuarioRepository;
++    private final MovimientoCajaRepository movimientoCajaRepository;
+ 
+-    public CajaService(TurnoCajaRepository turnoCajaRepository, UsuarioRepository usuarioRepository) {
++    public CajaService(TurnoCajaRepository turnoCajaRepository, UsuarioRepository usuarioRepository,
++                       MovimientoCajaRepository movimientoCajaRepository) {
+         this.turnoCajaRepository = turnoCajaRepository;
+         this.usuarioRepository = usuarioRepository;
++        this.movimientoCajaRepository = movimientoCajaRepository;
+     }
+ 
+     public boolean tieneCajaAbierta(AuthPrincipal p) {
+@@ -85,40 +90,86 @@
+         if (mov.getMonto() == null || mov.getMonto() <= 0 || mov.getMonto().isNaN() || mov.getMonto().isInfinite()) {
+             throw new NegocioException("El monto debe ser mayor a cero.");
+         }
++        String motivo = mov.getMotivo() == null ? "" : mov.getMotivo().trim();
++        if (motivo.length() < 3) {
++            throw new NegocioException("Indica el motivo del movimiento.");
++        }
++        if (motivo.length() > 255) {
++            throw new NegocioException("El motivo no puede superar los 255 caracteres.");
++        }
+         TurnoCaja turno = turnoAbierto(p, "No hay ninguna caja abierta para registrar movimientos.");
+         BigDecimal monto = BigDecimal.valueOf(mov.getMonto());
+         validarMonto(monto, false, "El monto");
+ 
++        String tipo;
+         if ("ingreso".equalsIgnoreCase(mov.getTipo())) {
+             turno.setIngresosExtra(nz(turno.getIngresosExtra()).add(monto));
++            tipo = MovimientoCaja.INGRESO;
+         } else if ("retiro".equalsIgnoreCase(mov.getTipo())) {
+             BigDecimal enCaja = efectivoEsperado(turno);
+             if (monto.compareTo(enCaja) > 0) {
+                 throw new NegocioException("No puedes retirar más efectivo del que hay en caja.");
+             }
+             turno.setRetiros(nz(turno.getRetiros()).add(monto));
++            tipo = MovimientoCaja.RETIRO;
+         } else {
+             throw new NegocioException("Tipo de movimiento inválido. Debe ser 'ingreso' o 'retiro'.");
+         }
+         turnoCajaRepository.save(turno);
++        auditar(turno, p, tipo, "EFECTIVO", monto, motivo, null, null);
+     }
+ 
+     /**
+      * Registra un abono de cliente en el turno abierto. Efectivo: entra al cajón (abonosCredito).
+-     * Tarjeta: no entra al cajón, se suma a ventasTarjeta.
++     * Tarjeta y transferencia: no entran al cajón, se suman a su propio total del turno.
+      */
+     @Transactional
+-    public void registrarAbono(AuthPrincipal p, BigDecimal monto, String metodoPago) {
++    public void registrarAbono(AuthPrincipal p, BigDecimal monto, String metodoPago, Long clienteId, String nombreCliente) {
+         validarMonto(monto, false, "El monto del abono");
+         TurnoCaja turno = turnoAbierto(p, "Abre la caja antes de registrar abonos.");
+-        if ("TARJETA".equalsIgnoreCase(metodoPago)) {
++        String metodo = metodoPago == null ? "" : metodoPago.trim().toUpperCase();
++        if ("TARJETA".equals(metodo)) {
+             turno.setVentasTarjeta(nz(turno.getVentasTarjeta()).add(monto));
+-        } else if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {
++        } else if ("TRANSFERENCIA".equals(metodo)) {
++            turno.setVentasTransferencia(nz(turno.getVentasTransferencia()).add(monto));
++        } else if ("EFECTIVO".equals(metodo)) {
+             turno.setAbonosCredito(nz(turno.getAbonosCredito()).add(monto));
+         } else {
+             throw new NegocioException("Método de pago del abono no soportado: " + metodoPago);
+         }
+         turnoCajaRepository.save(turno);
++        auditar(turno, p, MovimientoCaja.ABONO, metodo, monto,
++                "Abono de " + (nombreCliente != null ? nombreCliente : "cliente"), null, clienteId);
++    }
++
++    /** Movimientos manuales del turno abierto del usuario (más recientes primero). */
++    @Transactional(readOnly = true)
++    public List<MovimientoCaja> movimientosTurnoActual(AuthPrincipal p) {
++        TurnoCaja turno = turnoAbierto(p, "No hay ninguna caja abierta.");
++        return movimientoCajaRepository.porTurno(turno.getId(), p.empresaId());
++    }
++
++    /** Movimientos de cualquier turno de la empresa (solo administrador, ver SecurityConfig). */
++    @Transactional(readOnly = true)
++    public List<MovimientoCaja> movimientosDeTurno(AuthPrincipal p, Long turnoId) {
++        turnoCajaRepository.findByIdAndEmpresaId(turnoId, p.empresaId())
++                .orElseThrow(() -> new NegocioException("Turno no encontrado."));
++        return movimientoCajaRepository.porTurno(turnoId, p.empresaId());
++    }
++
++    private void auditar(TurnoCaja turno, AuthPrincipal p, String tipo, String metodo, BigDecimal monto,
++                         String motivo, Long ventaId, Long clienteId) {
++        MovimientoCaja m = new MovimientoCaja();
++        m.setTurno(turno);
++        m.setEmpresa(turno.getEmpresa());
++        m.setTipo(tipo);
++        m.setMetodoPago(metodo);
++        m.setMonto(monto);
++        m.setMotivo(motivo);
++        m.setUsuarioNombre(p.usuario());
++        m.setVentaId(ventaId);
++        m.setClienteId(clienteId);
++        movimientoCajaRepository.save(m);
+     }
+ 
+     @Transactional(readOnly = true)
+@@ -129,7 +180,7 @@
+     @Transactional(readOnly = true)
+     public ResumenCajaDTO obtenerResumen(AuthPrincipal p) {
+         TurnoCaja t = turnoAbierto(p, "No hay ninguna caja abierta.");
+-        return new ResumenCajaDTO(
++        ResumenCajaDTO resumen = new ResumenCajaDTO(
+                 nz(t.getMontoApertura()).doubleValue(),
+                 nz(t.getVentasEfectivo()).doubleValue(),
+                 nz(t.getVentasTarjeta()).doubleValue(),
+@@ -138,6 +189,8 @@
+                 nz(t.getAbonosCredito()).doubleValue(),
+                 nz(t.getRetiros()).doubleValue(),
+                 efectivoEsperado(t).doubleValue());
++        resumen.setVentasTransferencia(nz(t.getVentasTransferencia()).doubleValue());
++        return resumen;
+     }
+ 
+     /** Efectivo físico que debería haber: fondo + ventas en efectivo + ingresos + abonos en efectivo − retiros. */
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/CuentaClienteService.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/CuentaClienteService.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/CuentaClienteService.java	1969-12-31 21:00:00.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/CuentaClienteService.java	2026-10-31 14:51:57.484907186 -0300
+@@ -0,0 +1,41 @@
++package com.posbarlacteo.PosBarLacteo.service;
++
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++import com.posbarlacteo.PosBarLacteo.model.Cliente;
++import com.posbarlacteo.PosBarLacteo.model.MovimientoCliente;
++import com.posbarlacteo.PosBarLacteo.repository.ClienteRepository;
++import com.posbarlacteo.PosBarLacteo.repository.MovimientoClienteRepository;
++import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
++
++/** Estado de cuenta del cliente: deja constancia de cada cambio de su deuda con el saldo real resultante. */
++@Service
++public class CuentaClienteService {
++
++    private final ClienteRepository clienteRepository;
++    private final MovimientoClienteRepository movimientos;
++
++    public CuentaClienteService(ClienteRepository clienteRepository, MovimientoClienteRepository movimientos) {
++        this.clienteRepository = clienteRepository;
++        this.movimientos = movimientos;
++    }
++
++    /** Debe llamarse DESPUÉS del UPDATE atómico de la deuda: lee el saldo que quedó en la base. */
++    @Transactional
++    public void registrar(Cliente cliente, AuthPrincipal p, String tipo, double montoConSigno,
++                          Long ventaId, String metodo, String motivo) {
++        MovimientoCliente m = new MovimientoCliente();
++        m.setCliente(cliente);
++        m.setEmpresa(cliente.getEmpresa());
++        m.setTipo(tipo);
++        m.setMonto(montoConSigno);
++        Double saldo = clienteRepository.saldoActual(cliente.getId(), p.empresaId());
++        m.setSaldoResultante(saldo != null ? saldo : 0.0);
++        m.setVentaId(ventaId);
++        m.setMetodoPago(metodo);
++        m.setMotivo(motivo);
++        m.setUsuarioNombre(p.usuario());
++        movimientos.save(m);
++    }
++}
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/DteService.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/DteService.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/DteService.java	2026-10-26 13:53:50.000000000 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/DteService.java	2026-10-31 14:52:51.253347962 -0300
+@@ -1,5 +1,8 @@
+ package com.posbarlacteo.PosBarLacteo.service;
+ 
++import java.util.Collection;
++import java.util.List;
++
+ import org.springframework.stereotype.Service;
+ import com.posbarlacteo.PosBarLacteo.dto.PagoRequest;
+ import com.posbarlacteo.PosBarLacteo.model.ConfiguracionDte; // Entidad/Modelo de config DTE
+@@ -39,6 +42,14 @@
+      * Determina si emite un DTE oficial con el proveedor o genera el voucher informativo local.
+      */
+     public String obtenerDocumentoVenta(Venta venta, PagoRequest request, String metodoPago) {
++        return obtenerDocumentoVenta(venta, request, List.of(metodoPago));
++    }
++
++    /**
++     * Con pago mixto se emite el documento por el total si ALGUNO de los medios usados está configurado
++     * para emitir; el fiado (crédito) nunca emite en el momento de la venta.
++     */
++    public String obtenerDocumentoVenta(Venta venta, PagoRequest request, Collection<String> metodosPago) {
+         try {
+             // 1. Buscar la configuración DTE del cliente por su empresaId
+             ConfiguracionDte config = configDteRepository.findByEmpresaId(request.getEmpresaId())
+@@ -51,13 +62,12 @@
+ 
+             // 3. Verificar si aplica emitir DTE según el medio de pago (Evita doble IVA en tarjetas)
+             boolean debeEmitirDte = false;
+-
+-            if ("EFECTIVO".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaEfectivo()) {
+-                debeEmitirDte = true;
+-            } else if ("TARJETA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTarjeta()) {
+-                debeEmitirDte = true;
+-            } else if ("TRANSFERENCIA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTransferencia()) {
+-                debeEmitirDte = true;
++            for (String metodoPago : metodosPago) {
++                if (("EFECTIVO".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaEfectivo())
++                        || ("TARJETA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTarjeta())
++                        || ("TRANSFERENCIA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTransferencia())) {
++                    debeEmitirDte = true;
++                }
+             }
+ 
+             // 4. Si no aplica DTE para este medio de pago -> Voucher Local Informativo
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/InventarioService.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/InventarioService.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/InventarioService.java	2026-10-31 14:57:34.078952694 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/InventarioService.java	2026-10-31 14:52:07.600405464 -0300
+@@ -114,6 +114,22 @@
+                         MovimientoInventario.VENTA, "Venta N° " + ventaId, usuario, ventaId));
+     }
+ 
++    /**
++     * Anulación de una venta: repone exactamente lo que descontó (leído del historial, no recalculado
++     * desde las recetas actuales). Ventas anteriores al stock por sucursal no tienen historial y no reponen nada.
++     */
++    @Transactional
++    public void revertirVenta(AuthPrincipal p, Long ventaId, String motivo) {
++        List<MovimientoInventario> originales =
++                new java.util.ArrayList<>(movimientos.porVenta(p.empresaId(), ventaId, MovimientoInventario.VENTA));
++        originales.sort(java.util.Comparator.comparing(m -> m.getProducto().getId()));
++        for (MovimientoInventario m : originales) {
++            aplicar(p.empresaId(), m.getSucursal().getId(), m.getProducto().getId(),
++                    m.getProducto().getDescripcion(), -m.getCantidad(), true,
++                    MovimientoInventario.ANULACION, motivo, p.usuario(), ventaId);
++        }
++    }
++
+     /** Stock inicial al crear un producto (no pasa por la política: es una carga, siempre positiva). */
+     @Transactional
+     public void cargarStockInicial(AuthPrincipal p, Producto producto, double cantidad) {
+diff -ruN '--exclude=target' '--exclude=node_modules' /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java
+--- /tmp/claude-0/-home-claude/28034fc4-e832-53d2-8b58-cea466a0a2e7/scratchpad/base_b/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java	2026-10-31 14:57:34.079098082 -0300
++++ kipiweb_backend/src/main/java/com/posbarlacteo/PosBarLacteo/service/VentaService.java	2026-10-31 14:53:42.858891516 -0300
+@@ -1,21 +1,31 @@
+ package com.posbarlacteo.PosBarLacteo.service;
+ 
+ import java.math.BigDecimal;
++import java.time.LocalDateTime;
+ import java.util.ArrayList;
+ import java.util.HashMap;
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
++import java.util.Optional;
++import java.util.Set;
+ 
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
++import com.posbarlacteo.PosBarLacteo.dto.LineaPagoDTO;
++import com.posbarlacteo.PosBarLacteo.dto.PagoRequest;
++import com.posbarlacteo.PosBarLacteo.exception.AccesoDenegadoException;
+ import com.posbarlacteo.PosBarLacteo.exception.ConflictoException;
+ import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
+ import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
+ import com.posbarlacteo.PosBarLacteo.model.Cliente;
+ import com.posbarlacteo.PosBarLacteo.model.ItemVenta;
++import com.posbarlacteo.PosBarLacteo.model.MovimientoCaja;
++import com.posbarlacteo.PosBarLacteo.model.MovimientoCliente;
++import com.posbarlacteo.PosBarLacteo.model.PagoVenta;
+ import com.posbarlacteo.PosBarLacteo.model.Producto;
+ import com.posbarlacteo.PosBarLacteo.model.Receta;
+ import com.posbarlacteo.PosBarLacteo.model.TurnoCaja;
+@@ -23,6 +33,7 @@
+ import com.posbarlacteo.PosBarLacteo.model.Venta;
+ import com.posbarlacteo.PosBarLacteo.model.VentaDetalle;
+ import com.posbarlacteo.PosBarLacteo.repository.ClienteRepository;
++import com.posbarlacteo.PosBarLacteo.repository.MovimientoCajaRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.RecetaRepository;
+ import com.posbarlacteo.PosBarLacteo.repository.TurnoCajaRepository;
+@@ -35,18 +46,26 @@
+ 
+     private static final Logger log = LoggerFactory.getLogger(VentaService.class);
+ 
++    private static final Set<String> METODOS = Set.of(
++            PagoVenta.EFECTIVO, PagoVenta.TARJETA, PagoVenta.TRANSFERENCIA, PagoVenta.CREDITO);
++    private static final Set<String> PROVEEDORES_TARJETA = Set.of("GETNET", "MERCADOPAGO", "TRANSBANK");
++
+     private final ProductoRepository productoRepository;
+     private final RecetaRepository recetaRepository;
+     private final VentaRepository ventaRepository;
+     private final TurnoCajaRepository turnoCajaRepository;
+     private final UsuarioRepository usuarioRepository;
+     private final ClienteRepository clienteRepository;
++    private final CuentaClienteService cuentaClienteService;
++    private final MovimientoCajaRepository movimientoCajaRepository;
+     private final ValeCreditoPdfService valeCreditoPdfService;
+     private final InventarioService inventarioService;
+ 
+     public VentaService(ProductoRepository productoRepository, RecetaRepository recetaRepository,
+                         VentaRepository ventaRepository, TurnoCajaRepository turnoCajaRepository,
+                         UsuarioRepository usuarioRepository, ClienteRepository clienteRepository,
++                        CuentaClienteService cuentaClienteService,
++                        MovimientoCajaRepository movimientoCajaRepository,
+                         ValeCreditoPdfService valeCreditoPdfService, InventarioService inventarioService) {
+         this.productoRepository = productoRepository;
+         this.recetaRepository = recetaRepository;
+@@ -54,17 +73,29 @@
+         this.turnoCajaRepository = turnoCajaRepository;
+         this.usuarioRepository = usuarioRepository;
+         this.clienteRepository = clienteRepository;
++        this.cuentaClienteService = cuentaClienteService;
++        this.movimientoCajaRepository = movimientoCajaRepository;
+         this.valeCreditoPdfService = valeCreditoPdfService;
+         this.inventarioService = inventarioService;
+     }
+ 
++    /** Venta ya registrada con esa clave (reintento del mismo cobro), si existe. */
++    @Transactional(readOnly = true)
++    public Optional<Venta> buscarPorClave(AuthPrincipal p, String clave) {
++        if (clave == null || clave.isBlank()) {
++            return Optional.empty();
++        }
++        return ventaRepository.buscarPorClave(p.empresaId(), clave.trim());
++    }
++
+     /**
+      * Registra la venta completa. Empresa, cajero y sucursal salen SIEMPRE del token.
+      * El total se calcula en el servidor; si el monto informado por el cliente no coincide, se rechaza.
++     * Los pagos (uno o varios) deben sumar exactamente el total.
+      */
+     @Transactional
+-    public Venta procesarVentaCompleta(List<ItemVenta> items, long montoEsperado, String metodoPago,
+-                                       AuthPrincipal p, Long clienteId) {
++    public Venta procesarVenta(PagoRequest req, AuthPrincipal p) {
++        List<ItemVenta> items = req.getItems();
+         if (items == null || items.isEmpty()) {
+             throw new NegocioException("El carrito está vacío.");
+         }
+@@ -84,10 +115,18 @@
+                         "No hay un turno de caja abierto. Abre la caja antes de vender."));
+ 
+         Venta venta = new Venta();
+-        venta.setMetodoPago(metodoPago);
+         venta.setEmpresa(usuario.getEmpresa());
+         venta.setUsuario(usuario);
+         venta.setSucursal(usuario.getSucursal());
++        venta.setTurnoId(turno.getId());
++        venta.setEstado("COMPLETADA");
++        if (req.getIdempotencyKey() != null && !req.getIdempotencyKey().isBlank()) {
++            String clave = req.getIdempotencyKey().trim();
++            if (clave.length() > 64) {
++                throw new NegocioException("La clave de la operación no es válida.");
++            }
++            venta.setIdempotencyKey(clave);
++        }
+ 
+         List<VentaDetalle> detalles = new ArrayList<>();
+         Map<Long, Double> consumo = new HashMap<>();
+@@ -131,27 +170,61 @@
+         }
+ 
+         long totalServidor = Math.round(total);
+-        if (totalServidor != montoEsperado) {
+-            throw new ConflictoException("El total cambió (" + totalServidor + " vs " + montoEsperado
++        if (totalServidor != req.getMonto()) {
++            throw new ConflictoException("El total cambió (" + totalServidor + " vs " + req.getMonto()
+                     + "). Actualiza los precios del carrito e inténtalo de nuevo.");
+         }
++        if (totalServidor <= 0) {
++            throw new NegocioException("El total de la venta debe ser mayor a cero.");
++        }
+         venta.setTotal((double) totalServidor);
++        venta.setDetalles(detalles);
+ 
+-        if (clienteId != null) {
+-            Cliente cliente = clienteRepository.findByIdAndEmpresaId(clienteId, p.empresaId())
++        // ---- pagos ----
++        Map<String, LineaPagoDTO> lineas = normalizarPagos(req.getPagos(), totalServidor);
++        List<PagoVenta> pagos = new ArrayList<>();
++        for (LineaPagoDTO l : lineas.values()) {
++            PagoVenta pago = new PagoVenta();
++            pago.setVenta(venta);
++            pago.setMetodo(l.getMetodo());
++            pago.setMonto(l.getMonto());
++            pago.setReferencia(limpiar(l.getReferencia(), 100));
++            if (PagoVenta.TARJETA.equals(l.getMetodo())) {
++                String prov = l.getProveedorTarjeta() == null ? null : l.getProveedorTarjeta().trim().toUpperCase();
++                if (prov != null && !prov.isEmpty() && !PROVEEDORES_TARJETA.contains(prov)) {
++                    throw new NegocioException("Terminal de tarjeta no soportada: " + l.getProveedorTarjeta());
++                }
++                pago.setProveedorTarjeta(prov == null || prov.isEmpty() ? null : prov);
++            }
++            if (PagoVenta.TRANSFERENCIA.equals(l.getMetodo()) && !Boolean.TRUE.equals(l.getConfirmado())) {
++                throw new NegocioException("Confirma que recibiste la transferencia antes de registrar la venta.");
++            }
++            pago.setConfirmado(true);
++            pago.setConfirmadoPor(p.usuario());
++            pago.setFechaConfirmacion(LocalDateTime.now());
++            pagos.add(pago);
++        }
++        venta.setPagos(pagos);
++        venta.setMetodoPago(pagos.size() == 1 ? pagos.get(0).getMetodo() : "MIXTO");
++
++        // ---- crédito (fiado) ----
++        long montoCredito = lineas.containsKey(PagoVenta.CREDITO) ? lineas.get(PagoVenta.CREDITO).getMonto() : 0L;
++        Cliente cliente = null;
++        if (req.getClienteId() != null) {
++            cliente = clienteRepository.findByIdAndEmpresaId(req.getClienteId(), p.empresaId())
+                     .orElseThrow(() -> new NegocioException("Cliente no encontrado."));
+             venta.setCliente(cliente);
+-
+-            if ("CREDITO".equalsIgnoreCase(metodoPago)) {
+-                double deuda = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
+-                cliente.setDeudaActual(deuda + totalServidor);
+-                clienteRepository.save(cliente);
++        }
++        if (montoCredito > 0) {
++            if (!Boolean.TRUE.equals(usuario.getEmpresa().getPermiteFiado())) {
++                throw new NegocioException("El fiado no está habilitado para tu empresa. "
++                        + "Un administrador puede activarlo en Administración.");
++            }
++            if (cliente == null) {
++                throw new NegocioException("Para vender a crédito debes seleccionar un cliente.");
+             }
+-        } else if ("CREDITO".equalsIgnoreCase(metodoPago)) {
+-            throw new NegocioException("Para vender a crédito debes seleccionar un cliente.");
+         }
+ 
+-        venta.setDetalles(detalles);
+         ventaRepository.save(venta);
+ 
+         // Stock de la sucursal de la venta, atómico y con historial; si no alcanza (y la empresa no permite
+@@ -159,27 +232,206 @@
+         inventarioService.descontarVenta(p.empresaId(), usuario.getSucursal().getId(), venta.getId(),
+                 p.usuario(), consumo, nombres);
+ 
+-        BigDecimal monto = BigDecimal.valueOf(totalServidor);
+-        if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {
+-            turno.setVentasEfectivo(nz(turno.getVentasEfectivo()).add(monto));
+-        } else if ("TARJETA".equalsIgnoreCase(metodoPago)) {
+-            turno.setVentasTarjeta(nz(turno.getVentasTarjeta()).add(monto));
+-        } else if ("CREDITO".equalsIgnoreCase(metodoPago)) {
+-            turno.setVentasCredito(nz(turno.getVentasCredito()).add(monto));
++        if (montoCredito > 0) {
++            cargarCredito(cliente, p, venta.getId(), montoCredito);
++        }
++
++        // Totales del turno: una sola sentencia atómica (no pisa lo que otro proceso sume al mismo tiempo)
++        int filas = turnoCajaRepository.sumarVentas(turno.getId(),
++                monto(lineas, PagoVenta.EFECTIVO), monto(lineas, PagoVenta.TARJETA),
++                monto(lineas, PagoVenta.TRANSFERENCIA), monto(lineas, PagoVenta.CREDITO));
++        if (filas == 0) {
++            throw new NegocioException("El turno de caja ya no está abierto.");
++        }
++
++        if (montoCredito > 0) {
+             try {
+                 valeCreditoPdfService.generarGuardarYImprimirVale(venta, venta.getEmpresa().getRazonSocial());
+             } catch (Exception e) {
+                 log.warn("No se pudo generar el vale de crédito de la venta {}: {}", venta.getId(), e.getMessage());
+             }
++        }
++        return venta;
++    }
++
++    /**
++     * Anula una venta (solo administrador): repone el stock exacto que descontó, revierte la deuda del
++     * cliente y, si el turno sigue abierto, descuenta los cobros de sus totales. Devuelve un resumen.
++     */
++    @Transactional
++    public Map<String, Object> anular(AuthPrincipal p, Long ventaId, String motivo) {
++        if (!p.esAdmin()) {
++            throw new AccesoDenegadoException("Solo un administrador puede anular ventas.");
++        }
++        String razon = motivo == null ? "" : motivo.trim();
++        if (razon.length() < 3) {
++            throw new NegocioException("Indica el motivo de la anulación.");
++        }
++        if (razon.length() > 255) {
++            throw new NegocioException("El motivo no puede superar los 255 caracteres.");
++        }
++
++        Venta venta = ventaRepository.buscarConBloqueo(ventaId, p.empresaId())
++                .orElseThrow(() -> new RecursoNoEncontradoException("Venta no encontrada."));
++        if ("ANULADA".equals(venta.getEstado())) {
++            throw new ConflictoException("La venta N° " + ventaId + " ya estaba anulada.");
++        }
++
++        // 1) Stock: se invierte exactamente lo que se descontó
++        inventarioService.revertirVenta(p, ventaId, "Anulación venta N° " + ventaId);
++
++        // 2) Deuda del cliente
++        Map<String, BigDecimal> porMetodo = new LinkedHashMap<>();
++        if (venta.getPagos() != null && !venta.getPagos().isEmpty()) {
++            for (PagoVenta pago : venta.getPagos()) {
++                porMetodo.merge(pago.getMetodo(), BigDecimal.valueOf(pago.getMonto()), BigDecimal::add);
++            }
+         } else {
+-            throw new NegocioException("Método de pago no soportado: " + metodoPago);
++            porMetodo.put(venta.getMetodoPago() == null ? PagoVenta.EFECTIVO : venta.getMetodoPago(),
++                    BigDecimal.valueOf(venta.getTotal()));
++        }
++        double creditoRevertido = 0;
++        double excedenteCliente = 0;
++        BigDecimal credito = porMetodo.getOrDefault(PagoVenta.CREDITO, BigDecimal.ZERO);
++        if (credito.signum() > 0 && venta.getCliente() != null) {
++            Long clienteId = venta.getCliente().getId();
++            double saldo = nz(clienteRepository.saldoActual(clienteId, p.empresaId()));
++            double aReducir = Math.min(credito.doubleValue(), saldo);
++            if (aReducir > 0 && clienteRepository.abonarDeuda(clienteId, p.empresaId(), aReducir) > 0) {
++                creditoRevertido = aReducir;
++                cuentaClienteService.registrar(venta.getCliente(), p, MovimientoCliente.ANULACION, -aReducir,
++                        venta.getId(), null, "Anulación venta N° " + ventaId + ": " + razon);
++            }
++            // Si el cliente ya había abonado parte de esta deuda, le sobra dinero a su favor
++            excedenteCliente = credito.doubleValue() - creditoRevertido;
+         }
+-        turnoCajaRepository.save(turno);
+ 
+-        return venta;
++        // 3) Caja: solo si el turno de la venta sigue abierto se corrigen sus totales
++        boolean turnoAbierto = false;
++        if (venta.getTurnoId() != null) {
++            TurnoCaja turno = turnoCajaRepository.findByIdAndEmpresaId(venta.getTurnoId(), p.empresaId()).orElse(null);
++            if (turno != null && "ABIERTA".equals(turno.getEstado())) {
++                int filas = turnoCajaRepository.sumarVentas(turno.getId(),
++                        porMetodo.getOrDefault(PagoVenta.EFECTIVO, BigDecimal.ZERO).negate(),
++                        porMetodo.getOrDefault(PagoVenta.TARJETA, BigDecimal.ZERO).negate(),
++                        porMetodo.getOrDefault(PagoVenta.TRANSFERENCIA, BigDecimal.ZERO).negate(),
++                        credito.negate());
++                turnoAbierto = filas > 0;
++                if (turnoAbierto) {
++                    MovimientoCaja mc = new MovimientoCaja();
++                    mc.setTurno(turno);
++                    mc.setEmpresa(venta.getEmpresa());
++                    mc.setTipo(MovimientoCaja.ANULACION);
++                    mc.setMonto(BigDecimal.valueOf(venta.getTotal()));
++                    mc.setMotivo(razon);
++                    mc.setUsuarioNombre(p.usuario());
++                    mc.setVentaId(venta.getId());
++                    movimientoCajaRepository.save(mc);
++                }
++            }
++        }
++
++        venta.setEstado("ANULADA");
++        venta.setAnuladaPor(p.usuario());
++        venta.setFechaAnulacion(LocalDateTime.now());
++        venta.setMotivoAnulacion(razon);
++        ventaRepository.save(venta);
++
++        BigDecimal efectivo = porMetodo.getOrDefault(PagoVenta.EFECTIVO, BigDecimal.ZERO);
++        Map<String, Object> r = new LinkedHashMap<>();
++        r.put("ventaId", venta.getId());
++        r.put("estado", "ANULADA");
++        r.put("turnoAbierto", turnoAbierto);
++        r.put("efectivoADevolver", efectivo.longValue());
++        r.put("creditoRevertido", Math.round(creditoRevertido));
++        r.put("excedenteCliente", Math.round(excedenteCliente));
++        StringBuilder aviso = new StringBuilder();
++        if (!turnoAbierto && venta.getTurnoId() != null) {
++            aviso.append("El turno de esta venta ya estaba cerrado: sus totales no se modificaron. ")
++                 .append("Si devolviste efectivo, regístralo como retiro en tu caja con el motivo. ");
++        }
++        if (excedenteCliente > 0) {
++            aviso.append("El cliente ya había abonado parte de esta deuda: tiene $")
++                 .append(Math.round(excedenteCliente)).append(" a su favor que debes devolverle. ");
++        }
++        aviso.append("Si la venta tenía boleta electrónica, emite la nota de crédito desde tu proveedor de facturación.");
++        r.put("aviso", aviso.toString());
++        return r;
++    }
++
++    // ---------- helpers ----------
++
++    /** Valida y fusiona las líneas (un método una sola vez). Sin líneas informadas no hay venta: se exige al menos una. */
++    private Map<String, LineaPagoDTO> normalizarPagos(List<LineaPagoDTO> entrada, long total) {
++        if (entrada == null || entrada.isEmpty()) {
++            throw new NegocioException("Indica cómo se paga la venta.");
++        }
++        Map<String, LineaPagoDTO> resultado = new LinkedHashMap<>();
++        long suma = 0;
++        for (LineaPagoDTO l : entrada) {
++            if (l == null || l.getMetodo() == null) {
++                throw new NegocioException("Hay una forma de pago sin método.");
++            }
++            String metodo = l.getMetodo().trim().toUpperCase();
++            if (!METODOS.contains(metodo)) {
++                throw new NegocioException("Método de pago no soportado: " + l.getMetodo());
++            }
++            if (l.getMonto() == null || l.getMonto() <= 0) {
++                throw new NegocioException("El monto de cada forma de pago debe ser mayor a cero.");
++            }
++            LineaPagoDTO existente = resultado.get(metodo);
++            if (existente == null) {
++                LineaPagoDTO copia = new LineaPagoDTO();
++                copia.setMetodo(metodo);
++                copia.setMonto(l.getMonto());
++                copia.setProveedorTarjeta(l.getProveedorTarjeta());
++                copia.setReferencia(l.getReferencia());
++                copia.setConfirmado(l.getConfirmado());
++                resultado.put(metodo, copia);
++            } else {
++                existente.setMonto(existente.getMonto() + l.getMonto());
++                if (existente.getReferencia() == null) existente.setReferencia(l.getReferencia());
++                if (existente.getProveedorTarjeta() == null) existente.setProveedorTarjeta(l.getProveedorTarjeta());
++                existente.setConfirmado(Boolean.TRUE.equals(existente.getConfirmado()) && Boolean.TRUE.equals(l.getConfirmado()));
++            }
++            suma += l.getMonto();
++        }
++        if (suma != total) {
++            throw new NegocioException("Los pagos suman $" + suma + " y el total de la venta es $" + total + ".");
++        }
++        return resultado;
++    }
++
++    private void cargarCredito(Cliente cliente, AuthPrincipal p, Long ventaId, long monto) {
++        int filas = clienteRepository.cargarDeudaConLimite(cliente.getId(), p.empresaId(), monto);
++        if (filas == 0) {
++            double limite = nz(cliente.getLimiteCredito());
++            double deuda = nz(clienteRepository.saldoActual(cliente.getId(), p.empresaId()));
++            double disponible = Math.max(0, limite - deuda);
++            if (limite <= 0) {
++                throw new NegocioException("El cliente \"" + cliente.getNombre()
++                        + "\" no tiene crédito autorizado (límite $0).");
++            }
++            throw new NegocioException("Supera el límite de crédito de \"" + cliente.getNombre()
++                    + "\". Disponible: $" + Math.round(disponible) + ", solicitado: $" + monto + ".");
++        }
++        cuentaClienteService.registrar(cliente, p, MovimientoCliente.CARGO, monto, ventaId, PagoVenta.CREDITO,
++                "Venta N° " + ventaId + " a crédito");
++    }
++
++    private static BigDecimal monto(Map<String, LineaPagoDTO> lineas, String metodo) {
++        LineaPagoDTO l = lineas.get(metodo);
++        return l == null ? BigDecimal.ZERO : BigDecimal.valueOf(l.getMonto());
++    }
++
++    private static String limpiar(String s, int max) {
++        if (s == null) return null;
++        String t = s.trim();
++        if (t.isEmpty()) return null;
++        return t.length() > max ? t.substring(0, max) : t;
+     }
+ 
+-    private static BigDecimal nz(BigDecimal v) {
+-        return v != null ? v : BigDecimal.ZERO;
++    private static double nz(Double v) {
++        return v != null ? v : 0.0;
+     }
+ }

@@ -19,7 +19,9 @@ import jakarta.persistence.Table;
 import lombok.Data;
 
 @Entity
-@Table(name = "pos_ventas")
+@Table(name = "pos_ventas", uniqueConstraints = {
+    @jakarta.persistence.UniqueConstraint(name = "uk_venta_idempotencia", columnNames = {"empresa_id", "idempotency_key"})
+})
 @Data
 public class Venta {
     @Id
@@ -42,6 +44,31 @@ public class Venta {
     @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL)
     @JsonManagedReference 
     private List<VentaDetalle> detalles;
+
+    /** COMPLETADA (o null en ventas antiguas) | ANULADA */
+    @Column(name = "estado", length = 20)
+    private String estado = "COMPLETADA";
+
+    /** Turno de caja en que se cobró; null en ventas anteriores a esta versión. */
+    @Column(name = "turno_id")
+    private Long turnoId;
+
+    /** Clave enviada por el cliente para que un reintento no duplique la venta. */
+    @Column(name = "idempotency_key", length = 64)
+    private String idempotencyKey;
+
+    @Column(name = "anulada_por", length = 100)
+    private String anuladaPor;
+
+    @Column(name = "fecha_anulacion")
+    private java.time.LocalDateTime fechaAnulacion;
+
+    @Column(name = "motivo_anulacion", length = 255)
+    private String motivoAnulacion;
+
+    @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL)
+    @com.fasterxml.jackson.annotation.JsonManagedReference("pagos")
+    private List<PagoVenta> pagos;
 
     @PrePersist
     protected void onCreate() {

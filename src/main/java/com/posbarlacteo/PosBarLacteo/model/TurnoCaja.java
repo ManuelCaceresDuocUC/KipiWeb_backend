@@ -14,6 +14,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 @Entity
+@org.hibernate.annotations.DynamicUpdate // solo escribe las columnas modificadas: no pisa totales que cambian por UPDATE atómico
 @Table(name = "turnos_caja")
 public class TurnoCaja {
     
@@ -41,6 +42,9 @@ public class TurnoCaja {
 
     @Column(name = "ventas_tarjeta")
     private BigDecimal ventasTarjeta = BigDecimal.ZERO;
+
+    @Column(name = "ventas_transferencia")
+    private BigDecimal ventasTransferencia = BigDecimal.ZERO;
 
     @Column(name = "ventas_credito")
     private BigDecimal ventasCredito = BigDecimal.ZERO;
@@ -92,6 +96,8 @@ public class TurnoCaja {
     public void setVentasEfectivo(BigDecimal ventasEfectivo) { this.ventasEfectivo = ventasEfectivo; }
     public BigDecimal getVentasTarjeta() { return ventasTarjeta; }
     public void setVentasTarjeta(BigDecimal ventasTarjeta) { this.ventasTarjeta = ventasTarjeta; }
+    public BigDecimal getVentasTransferencia() { return ventasTransferencia; }
+    public void setVentasTransferencia(BigDecimal ventasTransferencia) { this.ventasTransferencia = ventasTransferencia; }
     public BigDecimal getVentasCredito() { return ventasCredito; }
     public void setVentasCredito(BigDecimal ventasCredito) { this.ventasCredito = ventasCredito; }
     public BigDecimal getIngresosExtra() { return ingresosExtra; }

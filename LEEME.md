@@ -1,24 +1,28 @@
-# KIPIPOS · Etapa 2 (backend) — Inventario por sucursal
+# KIPIPOS · Etapa 3A (backend) — Ventas y caja
 
-**Estado de verificación:** NO fue compilado en mi entorno (sin acceso a Maven Central). Solo hice revisión de sintaxis con javac; los errores que quedan allí son de Lombok, que no estaba disponible. Compila tú: `./mvnw -DskipTests compile` y pégame los errores si salen.
+**Estado de verificación:** NO fue compilado en mi entorno (sin acceso a Maven Central). Solo revisión de sintaxis con javac: sin errores de sintaxis; los errores restantes son por dependencias que faltan en mi entorno (Spring, Lombok). Compila tú: `./mvnw -DskipTests compile` y pásame lo que salga.
 
-## Qué cambia
-- **Catálogo por empresa, stock por sucursal.** Tabla `inventario_sucursal` (única por producto+sucursal). `Producto.stock` pasó a ser un campo calculado (no persistente) con el stock de la sucursal consultada; la columna antigua `pos_productos.stock` queda como `stockLegacy` (siempre 0, solo respaldo).
-- **Ventas descuentan de la sucursal del usuario**, atómicamente (UPDATE condicional, sin carreras) y en orden fijo de producto para evitar deadlocks. Si falta stock y la empresa no permite negativos → 409/400 "Stock insuficiente de X" y la venta completa se revierte.
-- **Stock negativo por empresa:** `empresas.permite_stock_negativo` (nulo = permitido, como hasta hoy). Se cambia desde la pantalla de Inventario.
-- **Historial** `movimientos_inventario` (venta, entrada, merma, ajuste, inicial) con usuario, motivo y stock resultante.
-- **Endpoints nuevos (solo admin)** `/api/inventario`: `GET /sucursales`, `GET|PUT /configuracion`, `POST /movimientos`, `GET /movimientos`.
-- `PUT/PATCH /api/productos` **ignoran `stock`** (solo se cambia vía movimientos). `POST` toma el stock como stock inicial en la sucursal del usuario. Se agrega `costo` opcional; el costo de inventario del dashboard usa `COALESCE(costo, precio)`.
-- Un producto nuevo no crea filas en otras sucursales: se crean al primer movimiento/venta (equivale a stock 0).
+**Si tuviste que corregir algo a mano en los archivos de la etapa 2**, no copies encima los que se repiten (`InventarioService`, `MovimientoInventario`, `Empresa`, `MovimientoInventarioRepository`): aplica `etapa3a.patch` o pásame tus versiones.
 
-## Orden de despliegue (importante)
-1. Despliega el backend (Hibernate crea tablas/columnas con `ddl-auto=update`).
-2. Ejecuta **`sql/04_migrar_stock_a_sucursal.sql`** en Railway (primero el PASO 0 de simulación, luego el PASO 1). Es idempotente y suma, no pisa.
-3. Despliega el frontend (zip aparte).
-Entre el paso 1 y 2 el stock mostrado será parcial: hazlo seguido.
+## Qué hace
+- **Pagos mixtos.** Nueva tabla `pos_ventas_pagos`: una venta puede pagarse con varios medios (efectivo, tarjeta, transferencia, crédito). La suma debe ser igual al total o el servidor rechaza la venta. Endpoint nuevo `POST /api/pagos/venta` (los antiguos `/efectivo`, `/cobrar`, `/credito` siguen funcionando). `pos_ventas.metodo_pago` queda como el medio único o `MIXTO`.
+- **Transferencia.** El cajero debe confirmar que el dinero llegó. Lleva N° de referencia opcional. El total del turno tiene columna propia (`ventas_transferencia`) y no entra al cajón. Los comprobantes adjuntos llegan en la 3B.
+- **Fiado por empresa** (`empresas.permite_fiado`, apagado por defecto) **con límite estricto por cliente**: se valida en la base con un UPDATE atómico, así dos ventas simultáneas no pueden pasarse del límite. Límite $0 = sin crédito. `PATCH /api/clientes/{id}` (admin) cambia el límite.
+- **Estado de cuenta del cliente** (`cliente_movimientos`): cada cargo, abono, anulación y ajuste con su saldo. `GET /api/clientes/{id}/movimientos`. Los abonos también aceptan transferencia y son atómicos.
+- **Anulación de ventas** (solo admin): `POST /api/ventas/{id}/anular` con motivo. Repone exactamente el stock que descontó, revierte la deuda del cliente y, si el turno sigue abierto, corrige sus totales. Si el turno ya estaba cerrado NO lo modifica y avisa para que registres el retiro del efectivo devuelto. No emite nota de crédito: eso viene con la etapa 4 (DTE).
+- **Auditoría de caja** (`movimientos_caja`): ingresos, retiros, abonos y anulaciones quedan con motivo, usuario y hora. Ahora el motivo es obligatorio. `GET /api/caja/movimientos` (turno actual) y `GET /api/caja/historial/{turnoId}/movimientos` (admin).
+- **Idempotencia:** el frontend manda una clave por intento de cobro (`pos_ventas.idempotency_key`, única por empresa). Si se corta la red y reintentan, devuelve la venta ya registrada en vez de cobrar doble.
+- Los totales del turno se suman con un UPDATE atómico (ya no se pisan entre sí) y el dashboard excluye las ventas anuladas.
+- Cuando hay pago mixto, la boleta electrónica se emite si ALGUNO de los medios usados está configurado para emitir (el fiado nunca emite).
+
+## Orden de despliegue
+1. Despliega el backend (Hibernate crea tablas y columnas).
+2. Corre `sql/05_etapa3a_datos_existentes.sql` en Railway: enciende el fiado solo en las empresas que ya lo usaban, y crea la línea de pago de las ventas antiguas. Repetible.
+3. Despliega el frontend (zip aparte). Si el frontend nuevo sale antes que el backend, el cobro falla (endpoint nuevo).
 
 ## Ojo
-- Usa `INSERT IGNORE` nativo → **solo MySQL**.
-- Si tu `inventario_sucursal` ya tenía filas con stock real del modelo anterior, el PASO 0 muestra `stock_actual_en_destino`: revísalo antes de migrar para no duplicar.
-- Aún NO incluye: traslados entre sucursales, creación de sucursales ni gestión de usuarios.
-- `etapa2.patch` es el diff completo respecto a la etapa 1.
+- **Fiado apagado por defecto.** Se activa en Administración → Gestión de Cartera.
+- Revisa la consulta (c) del SQL: clientes que ya deben más que su límite. Podrán pagar, pero no comprar más a crédito hasta bajar la deuda.
+- Ventas anteriores a la etapa 2 no tienen historial de stock: al anularlas no reponen inventario.
+- Los vales de crédito se siguen intentando imprimir desde el servidor (no hay impresora en Render; falla sin romper la venta). La impresión real llega en la 3B.
+- `etapa3a.patch` es el diff completo respecto a la etapa 2.

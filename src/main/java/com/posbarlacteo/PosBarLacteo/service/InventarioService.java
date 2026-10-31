@@ -114,6 +114,22 @@ public class InventarioService {
                         MovimientoInventario.VENTA, "Venta N° " + ventaId, usuario, ventaId));
     }
 
+    /**
+     * Anulación de una venta: repone exactamente lo que descontó (leído del historial, no recalculado
+     * desde las recetas actuales). Ventas anteriores al stock por sucursal no tienen historial y no reponen nada.
+     */
+    @Transactional
+    public void revertirVenta(AuthPrincipal p, Long ventaId, String motivo) {
+        List<MovimientoInventario> originales =
+                new java.util.ArrayList<>(movimientos.porVenta(p.empresaId(), ventaId, MovimientoInventario.VENTA));
+        originales.sort(java.util.Comparator.comparing(m -> m.getProducto().getId()));
+        for (MovimientoInventario m : originales) {
+            aplicar(p.empresaId(), m.getSucursal().getId(), m.getProducto().getId(),
+                    m.getProducto().getDescripcion(), -m.getCantidad(), true,
+                    MovimientoInventario.ANULACION, motivo, p.usuario(), ventaId);
+        }
+    }
+
     /** Stock inicial al crear un producto (no pasa por la política: es una carga, siempre positiva). */
     @Transactional
     public void cargarStockInicial(AuthPrincipal p, Producto producto, double cantidad) {

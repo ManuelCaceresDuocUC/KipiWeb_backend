@@ -9,6 +9,7 @@ public class ResumenCajaDTO {
     private Double abonosCredito; // ✨ CAMPO AGREGADO
     private Double retiros;
     private Double totalEnCaja;
+    private Double ventasTransferencia = 0.0;
 
     public ResumenCajaDTO() {}
 
@@ -54,4 +55,7 @@ public class ResumenCajaDTO {
 
     public Double getTotalEnCaja() { return totalEnCaja; }
     public void setTotalEnCaja(Double totalEnCaja) { this.totalEnCaja = totalEnCaja; }
+
+    public Double getVentasTransferencia() { return ventasTransferencia; }
+    public void setVentasTransferencia(Double ventasTransferencia) { this.ventasTransferencia = ventasTransferencia; }
 }

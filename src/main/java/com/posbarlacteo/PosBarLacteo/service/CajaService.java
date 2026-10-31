@@ -11,8 +11,10 @@ import com.posbarlacteo.PosBarLacteo.dto.CierreCajaDTO;
 import com.posbarlacteo.PosBarLacteo.dto.MovimientoCajaDTO;
 import com.posbarlacteo.PosBarLacteo.dto.ResumenCajaDTO;
 import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
+import com.posbarlacteo.PosBarLacteo.model.MovimientoCaja;
 import com.posbarlacteo.PosBarLacteo.model.TurnoCaja;
 import com.posbarlacteo.PosBarLacteo.model.Usuario;
+import com.posbarlacteo.PosBarLacteo.repository.MovimientoCajaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.TurnoCajaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.UsuarioRepository;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
@@ -25,10 +27,13 @@ public class CajaService {
 
     private final TurnoCajaRepository turnoCajaRepository;
     private final UsuarioRepository usuarioRepository;
+    private final MovimientoCajaRepository movimientoCajaRepository;
 
-    public CajaService(TurnoCajaRepository turnoCajaRepository, UsuarioRepository usuarioRepository) {
+    public CajaService(TurnoCajaRepository turnoCajaRepository, UsuarioRepository usuarioRepository,
+                       MovimientoCajaRepository movimientoCajaRepository) {
         this.turnoCajaRepository = turnoCajaRepository;
         this.usuarioRepository = usuarioRepository;
+        this.movimientoCajaRepository = movimientoCajaRepository;
     }
 
     public boolean tieneCajaAbierta(AuthPrincipal p) {
@@ -85,40 +90,86 @@ public class CajaService {
         if (mov.getMonto() == null || mov.getMonto() <= 0 || mov.getMonto().isNaN() || mov.getMonto().isInfinite()) {
             throw new NegocioException("El monto debe ser mayor a cero.");
         }
+        String motivo = mov.getMotivo() == null ? "" : mov.getMotivo().trim();
+        if (motivo.length() < 3) {
+            throw new NegocioException("Indica el motivo del movimiento.");
+        }
+        if (motivo.length() > 255) {
+            throw new NegocioException("El motivo no puede superar los 255 caracteres.");
+        }
         TurnoCaja turno = turnoAbierto(p, "No hay ninguna caja abierta para registrar movimientos.");
         BigDecimal monto = BigDecimal.valueOf(mov.getMonto());
         validarMonto(monto, false, "El monto");
 
+        String tipo;
         if ("ingreso".equalsIgnoreCase(mov.getTipo())) {
             turno.setIngresosExtra(nz(turno.getIngresosExtra()).add(monto));
+            tipo = MovimientoCaja.INGRESO;
         } else if ("retiro".equalsIgnoreCase(mov.getTipo())) {
             BigDecimal enCaja = efectivoEsperado(turno);
             if (monto.compareTo(enCaja) > 0) {
                 throw new NegocioException("No puedes retirar más efectivo del que hay en caja.");
             }
             turno.setRetiros(nz(turno.getRetiros()).add(monto));
+            tipo = MovimientoCaja.RETIRO;
         } else {
             throw new NegocioException("Tipo de movimiento inválido. Debe ser 'ingreso' o 'retiro'.");
         }
         turnoCajaRepository.save(turno);
+        auditar(turno, p, tipo, "EFECTIVO", monto, motivo, null, null);
     }
 
     /**
      * Registra un abono de cliente en el turno abierto. Efectivo: entra al cajón (abonosCredito).
-     * Tarjeta: no entra al cajón, se suma a ventasTarjeta.
+     * Tarjeta y transferencia: no entran al cajón, se suman a su propio total del turno.
      */
     @Transactional
-    public void registrarAbono(AuthPrincipal p, BigDecimal monto, String metodoPago) {
+    public void registrarAbono(AuthPrincipal p, BigDecimal monto, String metodoPago, Long clienteId, String nombreCliente) {
         validarMonto(monto, false, "El monto del abono");
         TurnoCaja turno = turnoAbierto(p, "Abre la caja antes de registrar abonos.");
-        if ("TARJETA".equalsIgnoreCase(metodoPago)) {
+        String metodo = metodoPago == null ? "" : metodoPago.trim().toUpperCase();
+        if ("TARJETA".equals(metodo)) {
             turno.setVentasTarjeta(nz(turno.getVentasTarjeta()).add(monto));
-        } else if ("EFECTIVO".equalsIgnoreCase(metodoPago)) {
+        } else if ("TRANSFERENCIA".equals(metodo)) {
+            turno.setVentasTransferencia(nz(turno.getVentasTransferencia()).add(monto));
+        } else if ("EFECTIVO".equals(metodo)) {
             turno.setAbonosCredito(nz(turno.getAbonosCredito()).add(monto));
         } else {
             throw new NegocioException("Método de pago del abono no soportado: " + metodoPago);
         }
         turnoCajaRepository.save(turno);
+        auditar(turno, p, MovimientoCaja.ABONO, metodo, monto,
+                "Abono de " + (nombreCliente != null ? nombreCliente : "cliente"), null, clienteId);
+    }
+
+    /** Movimientos manuales del turno abierto del usuario (más recientes primero). */
+    @Transactional(readOnly = true)
+    public List<MovimientoCaja> movimientosTurnoActual(AuthPrincipal p) {
+        TurnoCaja turno = turnoAbierto(p, "No hay ninguna caja abierta.");
+        return movimientoCajaRepository.porTurno(turno.getId(), p.empresaId());
+    }
+
+    /** Movimientos de cualquier turno de la empresa (solo administrador, ver SecurityConfig). */
+    @Transactional(readOnly = true)
+    public List<MovimientoCaja> movimientosDeTurno(AuthPrincipal p, Long turnoId) {
+        turnoCajaRepository.findByIdAndEmpresaId(turnoId, p.empresaId())
+                .orElseThrow(() -> new NegocioException("Turno no encontrado."));
+        return movimientoCajaRepository.porTurno(turnoId, p.empresaId());
+    }
+
+    private void auditar(TurnoCaja turno, AuthPrincipal p, String tipo, String metodo, BigDecimal monto,
+                         String motivo, Long ventaId, Long clienteId) {
+        MovimientoCaja m = new MovimientoCaja();
+        m.setTurno(turno);
+        m.setEmpresa(turno.getEmpresa());
+        m.setTipo(tipo);
+        m.setMetodoPago(metodo);
+        m.setMonto(monto);
+        m.setMotivo(motivo);
+        m.setUsuarioNombre(p.usuario());
+        m.setVentaId(ventaId);
+        m.setClienteId(clienteId);
+        movimientoCajaRepository.save(m);
     }
 
     @Transactional(readOnly = true)
@@ -129,7 +180,7 @@ public class CajaService {
     @Transactional(readOnly = true)
     public ResumenCajaDTO obtenerResumen(AuthPrincipal p) {
         TurnoCaja t = turnoAbierto(p, "No hay ninguna caja abierta.");
-        return new ResumenCajaDTO(
+        ResumenCajaDTO resumen = new ResumenCajaDTO(
                 nz(t.getMontoApertura()).doubleValue(),
                 nz(t.getVentasEfectivo()).doubleValue(),
                 nz(t.getVentasTarjeta()).doubleValue(),
@@ -138,6 +189,8 @@ public class CajaService {
                 nz(t.getAbonosCredito()).doubleValue(),
                 nz(t.getRetiros()).doubleValue(),
                 efectivoEsperado(t).doubleValue());
+        resumen.setVentasTransferencia(nz(t.getVentasTransferencia()).doubleValue());
+        return resumen;
     }
 
     /** Efectivo físico que debería haber: fondo + ventas en efectivo + ingresos + abonos en efectivo − retiros. */

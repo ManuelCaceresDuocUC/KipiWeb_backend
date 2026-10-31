@@ -187,4 +187,16 @@ public class Empresa {
     public void setPermiteStockNegativo(Boolean permiteStockNegativo) {
         this.permiteStockNegativo = permiteStockNegativo;
     }
+
+    // Fiado (venta a crédito) por empresa. null = deshabilitado: hay que activarlo explícitamente.
+    @Column(name = "permite_fiado")
+    private Boolean permiteFiado;
+
+    public Boolean getPermiteFiado() {
+        return permiteFiado;
+    }
+
+    public void setPermiteFiado(Boolean permiteFiado) {
+        this.permiteFiado = permiteFiado;
+    }
 }

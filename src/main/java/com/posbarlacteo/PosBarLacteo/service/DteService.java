@@ -1,5 +1,8 @@
 package com.posbarlacteo.PosBarLacteo.service;
 
+import java.util.Collection;
+import java.util.List;
+
 import org.springframework.stereotype.Service;
 import com.posbarlacteo.PosBarLacteo.dto.PagoRequest;
 import com.posbarlacteo.PosBarLacteo.model.ConfiguracionDte; // Entidad/Modelo de config DTE
@@ -39,6 +42,14 @@ public class DteService {
      * Determina si emite un DTE oficial con el proveedor o genera el voucher informativo local.
      */
     public String obtenerDocumentoVenta(Venta venta, PagoRequest request, String metodoPago) {
+        return obtenerDocumentoVenta(venta, request, List.of(metodoPago));
+    }
+
+    /**
+     * Con pago mixto se emite el documento por el total si ALGUNO de los medios usados está configurado
+     * para emitir; el fiado (crédito) nunca emite en el momento de la venta.
+     */
+    public String obtenerDocumentoVenta(Venta venta, PagoRequest request, Collection<String> metodosPago) {
         try {
             // 1. Buscar la configuración DTE del cliente por su empresaId
             ConfiguracionDte config = configDteRepository.findByEmpresaId(request.getEmpresaId())
@@ -51,13 +62,12 @@ public class DteService {
 
             // 3. Verificar si aplica emitir DTE según el medio de pago (Evita doble IVA en tarjetas)
             boolean debeEmitirDte = false;
-
-            if ("EFECTIVO".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaEfectivo()) {
-                debeEmitirDte = true;
-            } else if ("TARJETA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTarjeta()) {
-                debeEmitirDte = true;
-            } else if ("TRANSFERENCIA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTransferencia()) {
-                debeEmitirDte = true;
+            for (String metodoPago : metodosPago) {
+                if (("EFECTIVO".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaEfectivo())
+                        || ("TARJETA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTarjeta())
+                        || ("TRANSFERENCIA".equalsIgnoreCase(metodoPago) && config.isEmitirBoletaTransferencia())) {
+                    debeEmitirDte = true;
+                }
             }
 
             // 4. Si no aplica DTE para este medio de pago -> Voucher Local Informativo
