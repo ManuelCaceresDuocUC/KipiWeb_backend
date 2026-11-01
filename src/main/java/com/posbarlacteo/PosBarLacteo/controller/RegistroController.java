@@ -33,7 +33,13 @@ import com.posbarlacteo.PosBarLacteo.model.Usuario;
 import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.SucursalRepository;
 import com.posbarlacteo.PosBarLacteo.repository.UsuarioRepository;
+import com.posbarlacteo.PosBarLacteo.exception.LimiteExcedidoException;
+import com.posbarlacteo.PosBarLacteo.security.LimiteSolicitudes;
 import com.posbarlacteo.PosBarLacteo.service.FlowClient;
+import com.posbarlacteo.PosBarLacteo.service.MailService;
+import com.posbarlacteo.PosBarLacteo.service.VerificacionCorreoService;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +56,11 @@ public class RegistroController {
     private final SucursalRepository sucursalRepository;
 
     private final FlowClient flow;
+    private final VerificacionCorreoService verificacionCorreo;
+    private final LimiteSolicitudes limite;
+
+    @Value("${legal.terminos-version:2026-11-01}")
+    private String terminosVigente;
 
     @Value("${app.frontend.url:https://www.kipipos.cl}")
     private String frontendUrl;
@@ -67,13 +78,29 @@ public class RegistroController {
     // ------------------------------------------------------------------
     @PostMapping("/registrar-empresa")
     @Transactional(rollbackFor = Exception.class)
-    public ResponseEntity<?> registrarEmpresaCompleta(@RequestBody RegistroEmpresaDTO data) {
+    public ResponseEntity<?> registrarEmpresaCompleta(@RequestBody RegistroEmpresaDTO data, HttpServletRequest http) {
+        String ip = LimiteSolicitudes.ip(http);
+        if (!limite.permitir("registro|" + ip, 5, java.time.Duration.ofHours(1))) {
+            throw new LimiteExcedidoException("Demasiados intentos de registro. Inténtalo más tarde.");
+        }
+
         // Si el RUT quedó a medio registrar (nunca pagó) hace más de 30 min, se descarta para permitir registrarse de nuevo.
         // Va dentro de la misma transacción: si la validación falla, el descarte se revierte.
         String clienteFlowDescartado = descartarRegistroAbandonado(data);
 
         // Validar TODO antes de crear nada en Flow (evita clientes huérfanos)
         validarRegistro(data);
+
+        // Consentimiento explícito y constancia de qué versión aceptó
+        if (!data.isAceptaTerminos()) {
+            throw new NegocioException("Debes aceptar los Términos y Condiciones y la Política de Privacidad para continuar.");
+        }
+        if (!terminosVigente.equals(data.getTerminosVersion())) {
+            throw new ConflictoException("Actualizamos nuestros Términos y Condiciones. Recarga la página, léelos y vuelve a aceptarlos.");
+        }
+        // El correo del administrador debe estar verificado (se canjea dentro de la transacción)
+        verificacionCorreo.canjear(data.getAdmin().getCorreo(), data.getTokenVerificacion());
+
         if (clienteFlowDescartado != null) {
             eliminarClienteFlowSilencioso(clienteFlowDescartado);
         }
@@ -104,6 +131,9 @@ public class RegistroController {
         nuevaEmpresa.setFlowCustomerId(customerId);
         nuevaEmpresa.setEstado("PENDIENTE");
         nuevaEmpresa.setActivo(false);
+        nuevaEmpresa.setTerminosVersion(terminosVigente);
+        nuevaEmpresa.setTerminosAceptadosEn(LocalDateTime.now());
+        nuevaEmpresa.setTerminosIp(ip);
         empresaRepository.save(nuevaEmpresa);
 
         // ✨ 2.5 CREAR TODAS LAS SUCURSALES REGISTRADAS ✨
@@ -147,7 +177,10 @@ public class RegistroController {
                 Usuario nuevoEmpleado = new Usuario();
                 nuevoEmpleado.setUsuario(empData.getUsuario().trim());
                 nuevoEmpleado.setContrasena(passwordEncoder.encode(empData.getContrasena()));
-                nuevoEmpleado.setCorreo(empData.getUsuario().trim() + "@" + rutEmpresa + ".local");
+                String correoEmp = empData.getCorreo() == null ? "" : empData.getCorreo().trim();
+                nuevoEmpleado.setCorreo(correoEmp.isEmpty()
+                        ? empData.getUsuario().trim() + "@" + rutEmpresa + ".local" // sin correo real: se recupera con el administrador
+                        : MailService.validarDestino(correoEmp));
                 nuevoEmpleado.setRol(Roles.normalizar(empData.getRol()));
                 nuevoEmpleado.setEmpresa(nuevaEmpresa);
 

@@ -12,6 +12,13 @@ public class RegistroEmpresaDTO {
     private AdminDTO admin;
     private List<UsuarioDTO> empleados;
 
+    /** Token entregado al verificar el correo del administrador. */
+    private String tokenVerificacion;
+    /** El usuario marcó la casilla de términos y condiciones y política de privacidad. */
+    private boolean aceptaTerminos;
+    /** Versión de los términos que se le mostró (debe ser la vigente). */
+    private String terminosVersion;
+
     @Data
     public static class EmpresaDTO {
         private String rut_empresa;
@@ -40,5 +47,6 @@ public class RegistroEmpresaDTO {
         private String contrasena;
         private String rol;
         private String sucursalNombre; // ✨ Sucursal a la que pertenece el empleado
+        private String correo; // opcional: permite recuperar la contraseña por correo
     }
 }

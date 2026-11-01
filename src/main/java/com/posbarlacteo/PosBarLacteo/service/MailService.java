@@ -61,6 +61,36 @@ public class MailService {
         }
     }
 
+
+    /** Correo de texto plano (contacto, códigos, recuperación). replyTo es opcional. */
+    public void enviarTexto(String destino, String asunto, String mensaje, String replyTo) {
+        if (!habilitado()) {
+            throw new NegocioException("El envío de correos no está disponible por ahora. Inténtalo más tarde.");
+        }
+        String para = validarDestino(destino);
+        try {
+            MimeMessage msg = sender.createMimeMessage();
+            MimeMessageHelper h = new MimeMessageHelper(msg, false, "UTF-8");
+            h.setFrom(remitente, "KIPI");
+            h.setTo(para);
+            if (replyTo != null && !replyTo.isBlank()) {
+                h.setReplyTo(validarDestino(replyTo));
+            }
+            h.setSubject(asunto.replaceAll("[\\r\\n]+", " "));
+            h.setText(mensaje, false);
+            sender.send(msg);
+        } catch (NegocioException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("No se pudo enviar el correo a {}: {}", para, e.getMessage(), e);
+            throw new ServicioExternoException("No se pudo enviar el correo. Inténtalo nuevamente más tarde.");
+        }
+    }
+
+    public String remitente() {
+        return remitente;
+    }
+
     static String limpio(String s) {
         return s == null ? "" : HtmlUtils.htmlEscape(s);
     }

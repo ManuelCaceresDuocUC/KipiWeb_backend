@@ -200,6 +200,26 @@ public class Empresa {
         this.permiteFiado = permiteFiado;
     }
 
+    // ---- Aceptación de términos y condiciones (constancia legal del registro)
+    @JsonIgnore
+    @Column(name = "terminos_version", length = 20)
+    private String terminosVersion;
+
+    @JsonIgnore
+    @Column(name = "terminos_aceptados_en")
+    private LocalDateTime terminosAceptadosEn;
+
+    @JsonIgnore
+    @Column(name = "terminos_ip", length = 64)
+    private String terminosIp;
+
+    public String getTerminosVersion() { return terminosVersion; }
+    public void setTerminosVersion(String v) { this.terminosVersion = v; }
+    public LocalDateTime getTerminosAceptadosEn() { return terminosAceptadosEn; }
+    public void setTerminosAceptadosEn(LocalDateTime v) { this.terminosAceptadosEn = v; }
+    public String getTerminosIp() { return terminosIp; }
+    public void setTerminosIp(String v) { this.terminosIp = v; }
+
     // ---- Estado de la suscripción (sincronizado con Flow, ver SuscripcionService) ----
 
     /** Desde cuándo Flow reporta una factura vencida; null si está al día. */

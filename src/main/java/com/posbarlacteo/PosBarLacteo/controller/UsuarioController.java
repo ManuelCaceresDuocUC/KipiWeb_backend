@@ -9,6 +9,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import com.posbarlacteo.PosBarLacteo.service.MailService;
+import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -62,6 +67,43 @@ public class UsuarioController {
             }
             return m;
         }).toList();
+    }
+
+    public record NuevaClaveReq(String contrasena) { }
+
+    public record NuevoCorreoReq(String correo) { }
+
+    /** El administrador define una nueva contraseña para un usuario de SU empresa (empleados sin correo, olvidos, etc.). */
+    @PutMapping("/{id}/contrasena")
+    @Transactional
+    public Map<String, String> restablecerContrasena(@PathVariable Long id, @RequestBody NuevaClaveReq req) {
+        Usuario u = usuarioDeMiEmpresa(id);
+        String nueva = req.contrasena();
+        if (nueva == null || nueva.length() < 8 || nueva.length() > 100) {
+            throw new NegocioException("La contraseña debe tener entre 8 y 100 caracteres.");
+        }
+        u.setContrasena(passwordEncoder.encode(nueva));
+        usuarioRepository.save(u);
+        return Map.of("message", "Contraseña de \"" + u.getUsuario() + "\" actualizada.");
+    }
+
+    /** El administrador registra o corrige el correo de un usuario de su empresa (permite que recupere su clave solo). */
+    @PutMapping("/{id}/correo")
+    @Transactional
+    public Map<String, String> actualizarCorreo(@PathVariable Long id, @RequestBody NuevoCorreoReq req) {
+        Usuario u = usuarioDeMiEmpresa(id);
+        u.setCorreo(MailService.validarDestino(req.correo()));
+        usuarioRepository.save(u);
+        return Map.of("message", "Correo actualizado.");
+    }
+
+    private Usuario usuarioDeMiEmpresa(Long id) {
+        Long empresaId = SecurityUtils.actual().empresaId();
+        Usuario u = usuarioRepository.findById(id).orElseThrow(() -> new RecursoNoEncontradoException("Usuario no encontrado."));
+        if (u.getEmpresa() == null || !u.getEmpresa().getId().equals(empresaId)) {
+            throw new RecursoNoEncontradoException("Usuario no encontrado."); // no se revela que existe en otra empresa
+        }
+        return u;
     }
 
     @PostMapping("/login")

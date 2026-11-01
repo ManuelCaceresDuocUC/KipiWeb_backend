@@ -1,29 +1,26 @@
-# Etapa 5 – Backend: suscripción Flow, bloqueo por estado, RUT abandonado
+# Etapa 7 – Backend: contacto, verificación de correo, recuperación de clave, consentimiento
 
-Copia las carpetas sobre `kipiweb_backend` (mismas rutas). **Ojo: `application.properties` del ZIP es el completo de tu repo, con 4 líneas nuevas al final**; si tienes cambios locales, solo pega las líneas `suscripcion.*`.
+Copia sobre `kipiweb_backend` (mismas rutas). `application.properties` del ZIP es el completo con 3 bloques nuevos al final. Las tablas nuevas (`pos_verificaciones_correo`, `pos_tokens_recuperacion`) y columnas de Empresa (`terminos_*`) las crea Hibernate solo. **Sin compilar con Maven** (solo revisé sintaxis); si Render falla, pásame el log.
+
+## Variables en Render
+| Variable | Qué es |
+|---|---|
+| `TURNSTILE_SECRET` | Clave SECRETA de Cloudflare Turnstile. Sin ella el captcha no se verifica (el resto de protecciones sigue). |
+| `LEGAL_TERMINOS_VERSION` | `2026-11-01` (debe ser igual a `LEGAL.version` del frontend). Si cambias los términos, cambia ambos. |
+| `CONTACTO_DESTINO` | Opcional. Por defecto los mensajes llegan a `MAIL_USERNAME`. |
 
 ## Qué hace
-- **Conciliación con Flow** cada 6 h (y 3 min tras arrancar): consulta cada suscripción y actualiza estado (ACTIVA / EN_MORA / SUSPENDIDA).
-- **Factura vencida** → EN_MORA, 7 días de gracia con uso normal + aviso; luego SUSPENDIDA = **solo lectura** (se puede entrar, ver y pagar; ventas/cambios responden 402). Cerrar un turno de caja abierto sigue permitido.
-- **Cancelada en Flow** → acceso hasta el fin del período ya pagado.
-- **Si Flow falla, nunca se cambia un estado.** Freno de seguridad: si ≥3 empresas (y >30 %) pasarían a suspendidas de golpe, no se aplica nada y queda un log ERROR.
-- **Registro abandonado**: un RUT PENDIENTE sin pagar por más de 30 min se descarta y puede registrarse de nuevo (antes quedaba bloqueado para siempre).
-- **Corrección**: el retorno de Flow ahora verifica que la empresa exista ANTES de crear la suscripción (evita cobrar sin cuenta).
-- Endpoints: `GET /api/empresa/suscripcion` y `POST /api/empresa/suscripcion/sincronizar` ("Ya pagué", máx. 1 cada 30 s).
+- `POST /api/auth/contacto`: mensaje a tu correo (con Reply-To del consultante) + copia de confirmación al consultante. Límite 4/hora/IP, campo trampa y captcha.
+- Registro: **exige** correo verificado con código de 6 dígitos (vence en 10 min, 5 intentos, 4 códigos/hora/correo) y **casilla de términos** con la versión vigente. Se guarda en la empresa: versión aceptada, fecha/hora e IP (`terminos_*`). Máx. 5 registros/hora/IP.
+- Recuperación: `POST /api/auth/recuperar` (siempre responde igual, no revela si el usuario existe) y `/api/auth/restablecer`. Enlace de 30 min, un solo uso, solo se guarda su hash.
+- Empleados: `PUT /api/usuarios/{id}/contrasena` y `/correo` (solo ADMIN, solo usuarios de su empresa). Empleados sin correo real siguen con `usuario@rut.local` y se recuperan vía admin.
+- Limpieza diaria de códigos/enlaces vencidos.
 
-## Variables opcionales (Render)
-`SUSCRIPCION_GRACIA_DIAS` (7), `SUSCRIPCION_SYNC_INTERVALO` (PT6H), `SUSCRIPCION_SYNC_INICIAL` (PT3M), `SUSCRIPCION_SYNC_HABILITADO` (true; ponla en false para apagar el job).
-
-## Base de datos
-`ddl-auto=update` crea solas las columnas nuevas en `empresas`. No hay SQL.
-
-## ⚠ Sin compilar
-No pude compilar con Maven en mi entorno (sin acceso a Maven Central); solo revisé sintaxis. Si el build en Render falla, pásame el log.
-
-## Qué probar en sandbox de Flow
-1. Registrar empresa, pagar → ACTIVA.  2. Cobro fallido → EN_MORA con banner; forzar `mora_desde` a hace 8 días → solo lectura (402 al vender).  3. Pagar y "Ya pagué" → vuelve a normal.  4. Cancelar en Flow → sigue hasta `acceso_hasta`.  5. Registrar un RUT, no pagar, esperar 30 min (o bajar `fecha_registro` en la BD) y registrar de nuevo.
+## ⚠ Deploy
+Despliega backend y frontend juntos: el frontend anterior no envía el token de verificación y el registro del backend nuevo lo exige.
 
 ## Límites conocidos
-- Flow no documenta el payload del callback del plan, por eso no hay webhook: se concilia por consulta (6 h + botón).
-- Estado 3 de suscripción y respuesta de `customer/getSubscriptions` no están documentados; el código es defensivo y ante duda no cambia nada.
-- Reactivar una suscripción cancelada del todo requiere inscribir tarjeta de nuevo (no incluido).
+- Cambiar la contraseña no cierra sesiones ya abiertas (el JWT dura 10 h).
+- Los límites por IP viven en memoria (válido para una sola instancia en Render).
+- No existe aún pantalla para crear usuarios nuevos después del registro (solo se crean al registrar la empresa).
+- La IP se toma de `X-Forwarded-For`; detrás de Render es el valor esperado.

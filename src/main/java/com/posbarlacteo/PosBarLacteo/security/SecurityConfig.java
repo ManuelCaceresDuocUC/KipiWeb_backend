@@ -63,7 +63,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/**", "/api/dte/**", "/api/inventario/**", "/api/reportes/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/caja/historial", "/api/caja/historial/**", "/api/usuarios").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/ventas/*/anular", "/api/ventas/*/nota-credito/reintentar").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.PUT, "/api/empresa/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/empresa/**", "/api/usuarios/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PATCH, "/api/clientes/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/clientes/reiniciar-creditos").hasRole("ADMIN")
                 // Catálogo: lectura para todos; alta/edición/baja solo administrador

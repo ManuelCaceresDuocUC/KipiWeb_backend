@@ -47,6 +47,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return respuesta(HttpStatus.CONFLICT, e.getMessage());
     }
 
+    @ExceptionHandler(LimiteExcedidoException.class)
+    public ResponseEntity<Map<String, String>> limite(LimiteExcedidoException e) {
+        return respuesta(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+    }
+
     @ExceptionHandler(ServicioExternoException.class)
     public ResponseEntity<Map<String, String>> servicioExterno(ServicioExternoException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("message", e.getMessage()));
