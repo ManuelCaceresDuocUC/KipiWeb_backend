@@ -1,39 +1,25 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
 import java.net.URI;
-import java.time.Duration;
 import java.util.HashSet;
+import java.time.LocalDateTime;
 import java.util.Set;
-import java.nio.charset.StandardCharsets;
+import java.util.TreeMap;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.TreeMap;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import com.posbarlacteo.PosBarLacteo.dto.RegistroEmpresaDTO;
 import com.posbarlacteo.PosBarLacteo.exception.ConflictoException;
@@ -47,6 +33,7 @@ import com.posbarlacteo.PosBarLacteo.model.Usuario;
 import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.SucursalRepository;
 import com.posbarlacteo.PosBarLacteo.repository.UsuarioRepository;
+import com.posbarlacteo.PosBarLacteo.service.FlowClient;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -62,11 +49,7 @@ public class RegistroController {
     private final PasswordEncoder passwordEncoder;
     private final SucursalRepository sucursalRepository;
 
-    @Value("${flow.api.key}")
-    private String flowApiKey;
-
-    @Value("${flow.secret.key}")
-    private String flowSecretKey;
+    private final FlowClient flow;
 
     @Value("${app.frontend.url:https://www.kipipos.cl}")
     private String frontendUrl;
@@ -74,22 +57,10 @@ public class RegistroController {
     @Value("${app.backend.url:http://localhost:8080}")
     private String backendUrl;
 
-    @Value("${flow.base-url:https://sandbox.flow.cl/api}")
-    private String flowBaseUrl;
+    /** Minutos tras los cuales un registro sin pagar se considera abandonado y se puede reemplazar. */
+    private static final long MINUTOS_REGISTRO_ABANDONADO = 30;
 
     private static final String PLAN_ID = "KIPI";
-
-    private static final ParameterizedTypeReference<Map<String, Object>> MAP_TYPE =
-            new ParameterizedTypeReference<>() {};
-
-    private final RestTemplate restTemplate = crearRestTemplate();
-
-    private static RestTemplate crearRestTemplate() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(5));
-        factory.setReadTimeout(Duration.ofSeconds(20));
-        return new RestTemplate(factory);
-    }
 
     // ------------------------------------------------------------------
     // REGISTRO
@@ -97,8 +68,15 @@ public class RegistroController {
     @PostMapping("/registrar-empresa")
     @Transactional(rollbackFor = Exception.class)
     public ResponseEntity<?> registrarEmpresaCompleta(@RequestBody RegistroEmpresaDTO data) {
+        // Si el RUT quedó a medio registrar (nunca pagó) hace más de 30 min, se descarta para permitir registrarse de nuevo.
+        // Va dentro de la misma transacción: si la validación falla, el descarte se revierte.
+        String clienteFlowDescartado = descartarRegistroAbandonado(data);
+
         // Validar TODO antes de crear nada en Flow (evita clientes huérfanos)
         validarRegistro(data);
+        if (clienteFlowDescartado != null) {
+            eliminarClienteFlowSilencioso(clienteFlowDescartado);
+        }
         String rutEmpresa = RutUtils.normalizar(data.getEmpresa().getRut_empresa());
         log.info("Registro recibido: razonSocial={}, rut={}", data.getEmpresa().getRazon_social(), rutEmpresa);
 
@@ -198,6 +176,47 @@ public class RegistroController {
 
 
     // ------------------------------------------------------------------
+    // REGISTRO ABANDONADO
+    // ------------------------------------------------------------------
+    /**
+     * Si el RUT pertenece a un registro PENDIENTE (sin suscripción) con más de 30 minutos, lo elimina junto con sus
+     * usuarios y sucursales. Devuelve el id de cliente en Flow del registro descartado (para borrarlo después), o null.
+     */
+    private String descartarRegistroAbandonado(RegistroEmpresaDTO data) {
+        if (data == null || data.getEmpresa() == null || !RutUtils.esValido(data.getEmpresa().getRut_empresa())) {
+            return null; // validarRegistro informará el error
+        }
+        String rut = RutUtils.normalizar(data.getEmpresa().getRut_empresa());
+        Empresa existente = empresaRepository.findByRutEmpresa(rut).orElse(null);
+        if (existente == null || !"PENDIENTE".equals(existente.getEstado())) {
+            return null;
+        }
+        boolean sinSuscripcion = existente.getFlowSubscriptionId() == null || existente.getFlowSubscriptionId().isBlank();
+        boolean vencido = existente.getFechaRegistro() != null
+                && existente.getFechaRegistro().isBefore(LocalDateTime.now().minusMinutes(MINUTOS_REGISTRO_ABANDONADO));
+        if (!sinSuscripcion || !vencido) {
+            return null;
+        }
+        log.warn("Registro abandonado de la empresa {} (RUT {}): se descarta para permitir un nuevo registro.", existente.getId(), rut);
+        String clienteFlow = existente.getFlowCustomerId();
+        usuarioRepository.deleteAll(usuarioRepository.findByEmpresaId(existente.getId()));
+        sucursalRepository.deleteAll(sucursalRepository.findByEmpresaId(existente.getId()));
+        empresaRepository.delete(existente);
+        empresaRepository.flush();
+        return clienteFlow;
+    }
+
+    private void eliminarClienteFlowSilencioso(String customerId) {
+        try {
+            Map<String, String> params = new TreeMap<>();
+            params.put("customerId", customerId);
+            flow.post("/customer/delete", params);
+        } catch (RuntimeException e) {
+            log.warn("No se pudo borrar el cliente {} en Flow (se ignora): {}", customerId, e.getMessage());
+        }
+    }
+
+    // ------------------------------------------------------------------
     // VALIDACIÓN DE REGISTRO
     // ------------------------------------------------------------------
     private void validarRegistro(RegistroEmpresaDTO data) {
@@ -215,7 +234,11 @@ public class RegistroController {
         }
         String rut = RutUtils.normalizar(emp.getRut_empresa());
         if (empresaRepository.findByRutEmpresa(rut).isPresent()) {
-            throw new ConflictoException("Ya existe una empresa registrada con ese RUT. Si no terminaste el pago, contáctanos.");
+            Empresa existente = empresaRepository.findByRutEmpresa(rut).get();
+            if ("PENDIENTE".equals(existente.getEstado())) {
+                throw new ConflictoException("Hay un registro en curso con ese RUT. Si no alcanzaste a pagar, espera " + MINUTOS_REGISTRO_ABANDONADO + " minutos y vuelve a intentarlo, o contáctanos.");
+            }
+            throw new ConflictoException("Ya existe una empresa registrada con ese RUT. Si ya tienes cuenta, inicia sesión.");
         }
         if (admin.getCorreo() == null || !admin.getCorreo().matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
             throw new NegocioException("El correo del administrador no es válido.");
@@ -278,9 +301,13 @@ public class RegistroController {
 
             String customerId = (String) estadoRegistro.get("customerId");
 
-            Empresa yaRegistrada = empresaRepository.findByFlowCustomerId(customerId).orElse(null);
-            if (yaRegistrada != null && "ACTIVA".equals(yaRegistrada.getEstado())
-                    && yaRegistrada.getFlowSubscriptionId() != null) {
+            // La empresa debe existir ANTES de suscribir: si el registro fue descartado, no se cobra nada.
+            Empresa empresa = empresaRepository.findByFlowCustomerId(customerId).orElse(null);
+            if (empresa == null) {
+                log.warn("Retorno de Flow para el cliente {} sin empresa asociada (registro descartado): no se crea suscripción.", customerId);
+                return redirigir("error");
+            }
+            if ("ACTIVA".equals(empresa.getEstado()) && empresa.getFlowSubscriptionId() != null) {
                 // Recarga del retorno de Flow: no se crea una segunda suscripción
                 return redirigir("success");
             }
@@ -295,9 +322,6 @@ public class RegistroController {
                 log.warn("Suscripción rechazada o fallida. Estado: {}", statusStr);
                 return redirigir("payment_failed");
             }
-
-            Empresa empresa = empresaRepository.findByFlowCustomerId(customerId)
-                    .orElseThrow(() -> new RuntimeException("Empresa no encontrada con el ID de Flow"));
 
             if (suscripcion.containsKey("subscriptionId")) {
                 empresa.setFlowSubscriptionId(String.valueOf(suscripcion.get("subscriptionId")));
@@ -330,7 +354,7 @@ public class RegistroController {
         params.put("email", email);
         params.put("externalId", rutId);
 
-        Map<String, Object> responseMap = flowPost("/customer/create", params);
+        Map<String, Object> responseMap = flow.post("/customer/create", params);
 
         if (responseMap != null && responseMap.containsKey("customerId")) {
             return String.valueOf(responseMap.get("customerId"));
@@ -343,7 +367,7 @@ public class RegistroController {
         params.put("customerId", customerId);
         params.put("url_return", urlReturn);
 
-        Map<String, Object> responseMap = flowPost("/customer/register", params);
+        Map<String, Object> responseMap = flow.post("/customer/register", params);
 
         if (responseMap != null && responseMap.containsKey("url") && responseMap.containsKey("token")) {
             return responseMap.get("url") + "?token=" + responseMap.get("token");
@@ -355,87 +379,13 @@ public class RegistroController {
         Map<String, String> params = new TreeMap<>();
         params.put("customerId", customerId);
         params.put("planId", planId);
-        return flowPost("/subscription/create", params);
+        return flow.post("/subscription/create", params);
     }
 
     private Map<String, Object> consultarEstadoRegistro(String token) {
         Map<String, String> params = new TreeMap<>();
         params.put("token", token);
-        return flowGet("/customer/getRegisterStatus", params);
+        return flow.get("/customer/getRegisterStatus", params);
     }
 
-    private Map<String, Object> consultarEstadoSuscripcion(String subscriptionId) {
-        Map<String, String> params = new TreeMap<>();
-        params.put("subscriptionId", subscriptionId);
-        return flowGet("/subscription/get", params);
-    }
-
-    // ------------------------------------------------------------------
-    // HTTP + FIRMA
-    // ------------------------------------------------------------------
-    private Map<String, Object> flowPost(String endpoint, Map<String, String> params) {
-        params.put("apiKey", flowApiKey.trim());
-        params.put("s", firmar(params));
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
-
-        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
-        params.forEach(body::add);
-
-        try {
-            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    flowBaseUrl + endpoint, HttpMethod.POST, new HttpEntity<>(body, headers), MAP_TYPE);
-            return response.getBody();
-        } catch (HttpStatusCodeException e) {
-            log.error("Flow POST {} -> {} | body: [{}]", endpoint, e.getStatusCode(), e.getResponseBodyAsString());
-            throw new ServicioExternoException("El sistema de pagos rechazó la solicitud. Revisa los datos e inténtalo nuevamente.");
-        } catch (org.springframework.web.client.RestClientException e) {
-            log.error("Flow {} no disponible: {}", endpoint, e.getMessage());
-            throw new ServicioExternoException("No se pudo conectar con el sistema de pagos. Inténtalo más tarde.");
-        }
-    }
-
-    private Map<String, Object> flowGet(String endpoint, Map<String, String> params) {
-        params.put("apiKey", flowApiKey.trim());
-        params.put("s", firmar(params));
-
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(flowBaseUrl + endpoint);
-        params.forEach(builder::queryParam);
-        URI uri = builder.build().encode().toUri();
-
-        try {
-            ResponseEntity<Map<String, Object>> response =
-                    restTemplate.exchange(uri, HttpMethod.GET, null, MAP_TYPE);
-            return response.getBody();
-        } catch (HttpStatusCodeException e) {
-            log.error("Flow GET {} -> {} | body: [{}]", endpoint, e.getStatusCode(), e.getResponseBodyAsString());
-            throw new ServicioExternoException("No se pudo consultar el sistema de pagos. Inténtalo más tarde.");
-        } catch (org.springframework.web.client.RestClientException e) {
-            log.error("Flow {} no disponible: {}", endpoint, e.getMessage());
-            throw new ServicioExternoException("No se pudo conectar con el sistema de pagos. Inténtalo más tarde.");
-        }
-    }
-
-    private String firmar(Map<String, String> params) {
-        try {
-            StringBuilder toSign = new StringBuilder();
-            for (Map.Entry<String, String> e : params.entrySet()) {
-                if ("s".equals(e.getKey())) continue;
-                toSign.append(e.getKey()).append(e.getValue());
-            }
-
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(flowSecretKey.trim().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] hash = mac.doFinal(toSign.toString().getBytes(StandardCharsets.UTF_8));
-
-            StringBuilder hex = new StringBuilder();
-            for (byte b : hash) {
-                hex.append(String.format("%02x", b));
-            }
-            return hex.toString();
-        } catch (Exception e) {
-            throw new RuntimeException("Error firmando petición a Flow", e);
-        }
-    }
 }

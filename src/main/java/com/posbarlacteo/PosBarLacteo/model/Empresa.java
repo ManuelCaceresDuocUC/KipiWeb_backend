@@ -199,4 +199,47 @@ public class Empresa {
     public void setPermiteFiado(Boolean permiteFiado) {
         this.permiteFiado = permiteFiado;
     }
+
+    // ---- Estado de la suscripción (sincronizado con Flow, ver SuscripcionService) ----
+
+    /** Desde cuándo Flow reporta una factura vencida; null si está al día. */
+    @JsonIgnore
+    @Column(name = "mora_desde")
+    private LocalDateTime moraDesde;
+
+    /** Si la suscripción fue cancelada: hasta cuándo alcanza el período ya pagado. */
+    @JsonIgnore
+    @Column(name = "acceso_hasta")
+    private LocalDateTime accesoHasta;
+
+    @JsonIgnore
+    @Column(name = "suscripcion_cancelada")
+    private Boolean suscripcionCancelada;
+
+    @JsonIgnore
+    @Column(name = "flow_ultima_sync")
+    private LocalDateTime flowUltimaSync;
+
+    /** Último status de la suscripción informado por Flow (0 inactiva, 1 activa, 2 trial, 4 cancelada). */
+    @JsonIgnore
+    @Column(name = "flow_status")
+    private Integer flowStatus;
+
+    /** Último "morose" informado por Flow (0 al día, 1 vencida, 2 pendiente). */
+    @JsonIgnore
+    @Column(name = "flow_morosidad")
+    private Integer flowMorosidad;
+
+    public LocalDateTime getMoraDesde() { return moraDesde; }
+    public void setMoraDesde(LocalDateTime moraDesde) { this.moraDesde = moraDesde; }
+    public LocalDateTime getAccesoHasta() { return accesoHasta; }
+    public void setAccesoHasta(LocalDateTime accesoHasta) { this.accesoHasta = accesoHasta; }
+    public Boolean getSuscripcionCancelada() { return suscripcionCancelada; }
+    public void setSuscripcionCancelada(Boolean suscripcionCancelada) { this.suscripcionCancelada = suscripcionCancelada; }
+    public LocalDateTime getFlowUltimaSync() { return flowUltimaSync; }
+    public void setFlowUltimaSync(LocalDateTime flowUltimaSync) { this.flowUltimaSync = flowUltimaSync; }
+    public Integer getFlowStatus() { return flowStatus; }
+    public void setFlowStatus(Integer flowStatus) { this.flowStatus = flowStatus; }
+    public Integer getFlowMorosidad() { return flowMorosidad; }
+    public void setFlowMorosidad(Integer flowMorosidad) { this.flowMorosidad = flowMorosidad; }
 }

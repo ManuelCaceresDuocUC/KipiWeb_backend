@@ -19,6 +19,8 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import com.posbarlacteo.PosBarLacteo.service.SuscripcionService;
+
 import jakarta.servlet.http.HttpServletResponse;
 
 @Configuration
@@ -26,6 +28,7 @@ import jakarta.servlet.http.HttpServletResponse;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final SuscripcionService suscripcionService;
 
     @Value("${app.frontend.url}")
     private String frontendUrl;
@@ -33,8 +36,9 @@ public class SecurityConfig {
     @Value("${app.cors.extra-origins:}")
     private String extraOrigins;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, SuscripcionService suscripcionService) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.suscripcionService = suscripcionService;
     }
 
     @Bean
@@ -71,7 +75,8 @@ public class SecurityConfig {
                 // 4. Operativa general del POS (cualquier usuario autenticado de la empresa)
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(new SuscripcionFilter(suscripcionService), JwtAuthFilter.class);
 
         return http.build();
     }
