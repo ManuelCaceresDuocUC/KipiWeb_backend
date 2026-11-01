@@ -9,6 +9,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import com.posbarlacteo.PosBarLacteo.service.UsuarioActivoService;
+import com.posbarlacteo.PosBarLacteo.repository.SucursalRepository;
+import com.posbarlacteo.PosBarLacteo.exception.ConflictoException;
+import org.springframework.web.bind.annotation.PatchMapping;
 import com.posbarlacteo.PosBarLacteo.service.MailService;
 import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
 import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
@@ -42,9 +46,14 @@ public class UsuarioController {
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
     private final LoginAttemptService loginAttempts;
+    private final SucursalRepository sucursalRepository;
+    private final UsuarioActivoService usuarioActivo;
 
     public UsuarioController(UsuarioRepository usuarioRepository, JwtService jwtService,
-                             PasswordEncoder passwordEncoder, LoginAttemptService loginAttempts) {
+                             PasswordEncoder passwordEncoder, LoginAttemptService loginAttempts,
+                             SucursalRepository sucursalRepository, UsuarioActivoService usuarioActivo) {
+        this.sucursalRepository = sucursalRepository;
+        this.usuarioActivo = usuarioActivo;
         this.usuarioRepository = usuarioRepository;
         this.jwtService = jwtService;
         this.passwordEncoder = passwordEncoder;
@@ -62,11 +71,120 @@ public class UsuarioController {
             m.put("usuario", u.getUsuario());
             m.put("correo", u.getCorreo());
             m.put("rol", Roles.normalizar(u.getRol()));
+            m.put("activo", u.estaActivo());
             if (u.getSucursal() != null) {
                 m.put("sucursal", Map.of("id", u.getSucursal().getId(), "nombre", u.getSucursal().getNombre()));
             }
             return m;
         }).toList();
+    }
+
+    public record NuevoUsuarioReq(String usuario, String contrasena, String rol, Long sucursalId, String correo) { }
+
+    public record EditarUsuarioReq(String rol, Long sucursalId) { }
+
+    public record EstadoReq(Boolean activo) { }
+
+    private static final java.util.regex.Pattern NOMBRE_USUARIO = java.util.regex.Pattern.compile("^[\\p{L}0-9._-]{3,50}$");
+
+    /** Crea un usuario en la empresa del administrador. */
+    @PostMapping
+    @Transactional
+    public Map<String, Object> crear(@RequestBody NuevoUsuarioReq req) {
+        AuthPrincipal yo = SecurityUtils.actual();
+        Usuario admin = usuarioRepository.findById(yo.usuarioId()).orElseThrow(() -> new RecursoNoEncontradoException("Sesión no válida."));
+        Empresa empresa = admin.getEmpresa();
+
+        String nombre = req.usuario() == null ? "" : req.usuario().trim();
+        if (!NOMBRE_USUARIO.matcher(nombre).matches()) {
+            throw new NegocioException("El usuario debe tener entre 3 y 50 caracteres: letras, números, punto, guion o guion bajo (sin espacios).");
+        }
+        if (usuarioRepository.existsByUsuario(nombre)) {
+            throw new ConflictoException("El nombre de usuario \"" + nombre + "\" ya está en uso.");
+        }
+        String clave = req.contrasena();
+        if (clave == null || clave.length() < 8 || clave.length() > 100) {
+            throw new NegocioException("La contraseña debe tener entre 8 y 100 caracteres.");
+        }
+        Sucursal sucursal = sucursalDeMiEmpresa(req.sucursalId(), empresa.getId());
+
+        String correoIngresado = req.correo() == null ? "" : req.correo().trim();
+        String correo = correoIngresado.isEmpty()
+                ? nombre + "@" + empresa.getRutEmpresa() + ".local" // sin correo real: se recupera con el administrador
+                : MailService.validarDestino(correoIngresado);
+
+        Usuario u = new Usuario();
+        u.setUsuario(nombre);
+        u.setContrasena(passwordEncoder.encode(clave));
+        u.setCorreo(correo);
+        u.setRol(Roles.normalizar(req.rol()));
+        u.setEmpresa(empresa);
+        u.setSucursal(sucursal);
+        u.setActivo(true);
+        usuarioRepository.save(u);
+        return Map.of("id", u.getId(), "message", "Usuario creado.");
+    }
+
+    /** Cambia el rol y/o la sucursal de otro usuario de la empresa. */
+    @PutMapping("/{id}")
+    @Transactional
+    public Map<String, String> editar(@PathVariable Long id, @RequestBody EditarUsuarioReq req) {
+        AuthPrincipal yo = SecurityUtils.actual();
+        Usuario u = usuarioDeMiEmpresa(id);
+        if (u.getId().equals(yo.usuarioId())) {
+            throw new NegocioException("No puedes cambiar tu propio rol ni sucursal. Pídeselo a otro administrador.");
+        }
+        String nuevoRol = req.rol() == null ? Roles.normalizar(u.getRol()) : Roles.normalizar(req.rol());
+        if (Roles.esAdmin(u.getRol()) && u.estaActivo() && !Roles.ADMIN.equals(nuevoRol)) {
+            exigirOtroAdminActivo(u);
+        }
+        if (req.sucursalId() != null) {
+            u.setSucursal(sucursalDeMiEmpresa(req.sucursalId(), u.getEmpresa().getId()));
+        }
+        u.setRol(nuevoRol);
+        usuarioRepository.save(u);
+        return Map.of("message", "Usuario actualizado. Los cambios de rol aplican en su próximo inicio de sesión.");
+    }
+
+    /** Activa o desactiva un usuario (no se borra: conserva su historial de ventas y cajas). */
+    @PatchMapping("/{id}/estado")
+    @Transactional
+    public Map<String, String> cambiarEstado(@PathVariable Long id, @RequestBody EstadoReq req) {
+        AuthPrincipal yo = SecurityUtils.actual();
+        if (req.activo() == null) {
+            throw new NegocioException("Indica si el usuario debe quedar activo o desactivado.");
+        }
+        Usuario u = usuarioDeMiEmpresa(id);
+        if (!req.activo()) {
+            if (u.getId().equals(yo.usuarioId())) {
+                throw new NegocioException("No puedes desactivar tu propia cuenta.");
+            }
+            if (Roles.esAdmin(u.getRol()) && u.estaActivo()) {
+                exigirOtroAdminActivo(u);
+            }
+        }
+        u.setActivo(req.activo());
+        usuarioRepository.save(u);
+        usuarioActivo.invalidar(u.getId());
+        return Map.of("message", req.activo() ? "Usuario activado." : "Usuario desactivado. Perderá el acceso en unos segundos.");
+    }
+
+    private void exigirOtroAdminActivo(Usuario objetivo) {
+        long otros = usuarioRepository.findByEmpresaId(objetivo.getEmpresa().getId()).stream()
+                .filter(x -> !x.getId().equals(objetivo.getId()) && x.estaActivo() && Roles.esAdmin(x.getRol()))
+                .count();
+        if (otros == 0) {
+            throw new NegocioException("La empresa debe conservar al menos un administrador activo.");
+        }
+    }
+
+    private Sucursal sucursalDeMiEmpresa(Long sucursalId, Long empresaId) {
+        if (sucursalId == null) {
+            throw new NegocioException("Selecciona la sucursal del usuario.");
+        }
+        return sucursalRepository.findByIdAndEmpresaId(sucursalId, empresaId)
+                .filter(s -> !Boolean.FALSE.equals(s.getActivo()))
+                .orElseThrow(() -> new NegocioException("La sucursal seleccionada no existe o está inactiva."));
     }
 
     public record NuevaClaveReq(String contrasena) { }
@@ -140,6 +258,11 @@ public class UsuarioController {
         if ("PENDIENTE".equals(empresa.getEstado())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("message", "Tu empresa aún no completa el pago de la suscripción."));
+        }
+
+        if (!encontrado.estaActivo()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Tu usuario está desactivado. Contacta a tu administrador."));
         }
 
         loginAttempts.exito(llave);

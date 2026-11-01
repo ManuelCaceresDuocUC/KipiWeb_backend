@@ -8,6 +8,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.posbarlacteo.PosBarLacteo.service.SuscripcionService;
+import com.posbarlacteo.PosBarLacteo.service.UsuarioActivoService;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -25,9 +26,11 @@ import jakarta.servlet.http.HttpServletResponse;
 public class SuscripcionFilter extends OncePerRequestFilter {
 
     private final SuscripcionService suscripcionService;
+    private final UsuarioActivoService usuarioActivo;
 
-    public SuscripcionFilter(SuscripcionService suscripcionService) {
+    public SuscripcionFilter(SuscripcionService suscripcionService, UsuarioActivoService usuarioActivo) {
         this.suscripcionService = suscripcionService;
+        this.usuarioActivo = usuarioActivo;
     }
 
     @Override
@@ -37,6 +40,18 @@ public class SuscripcionFilter extends OncePerRequestFilter {
         if (auth == null || !(auth.getPrincipal() instanceof AuthPrincipal p) || p.empresaId() == null) {
             chain.doFilter(req, res);
             return;
+        }
+
+        // Usuario desactivado por su administrador: pierde el acceso aunque su token siga vigente
+        try {
+            if (!usuarioActivo.activo(p.usuarioId())) {
+                res.setStatus(401);
+                res.setContentType("application/json;charset=UTF-8");
+                res.getWriter().write("{\"message\":\"Tu usuario fue desactivado. Contacta a tu administrador.\"}");
+                return;
+            }
+        } catch (RuntimeException e) {
+            // ante un fallo interno no se bloquea
         }
 
         String path = req.getRequestURI();

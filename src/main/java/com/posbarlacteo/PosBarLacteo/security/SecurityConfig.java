@@ -20,6 +20,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.posbarlacteo.PosBarLacteo.service.SuscripcionService;
+import com.posbarlacteo.PosBarLacteo.service.UsuarioActivoService;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -29,6 +30,7 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
     private final SuscripcionService suscripcionService;
+    private final UsuarioActivoService usuarioActivoService;
 
     @Value("${app.frontend.url}")
     private String frontendUrl;
@@ -36,7 +38,8 @@ public class SecurityConfig {
     @Value("${app.cors.extra-origins:}")
     private String extraOrigins;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter, SuscripcionService suscripcionService) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, SuscripcionService suscripcionService, UsuarioActivoService usuarioActivoService) {
+        this.usuarioActivoService = usuarioActivoService;
         this.jwtAuthFilter = jwtAuthFilter;
         this.suscripcionService = suscripcionService;
     }
@@ -64,6 +67,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/caja/historial", "/api/caja/historial/**", "/api/usuarios").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/ventas/*/anular", "/api/ventas/*/nota-credito/reintentar").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/empresa/**", "/api/usuarios/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/usuarios").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PATCH, "/api/usuarios/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PATCH, "/api/clientes/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/clientes/reiniciar-creditos").hasRole("ADMIN")
                 // Catálogo: lectura para todos; alta/edición/baja solo administrador
@@ -76,7 +81,7 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterAfter(new SuscripcionFilter(suscripcionService), JwtAuthFilter.class);
+            .addFilterAfter(new SuscripcionFilter(suscripcionService, usuarioActivoService), JwtAuthFilter.class);
 
         return http.build();
     }

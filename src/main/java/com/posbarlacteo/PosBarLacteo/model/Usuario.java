@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -42,6 +43,15 @@ public class Usuario {
 
     @Column(name = "rol", nullable = false)
     private String rol = "vendedor";
+
+    /** null = usuarios anteriores a esta columna (se consideran activos). */
+    @JsonIgnore
+    @Column(name = "activo")
+    private Boolean activo = true;
+
+    public boolean estaActivo() {
+        return !Boolean.FALSE.equals(activo);
+    }
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "empresa_id", nullable = false)
