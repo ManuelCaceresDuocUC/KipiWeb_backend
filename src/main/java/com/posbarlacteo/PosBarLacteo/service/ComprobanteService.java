@@ -98,6 +98,33 @@ public class ComprobanteService {
         return new Archivo(key, nombreSeguro(archivo.getOriginalFilename(), tipo[1]), tipo[0]);
     }
 
+    /** Guarda un documento generado por el sistema (p. ej. el PDF de la boleta). Devuelve la clave o null si no hay S3. */
+    public String guardarBytes(String key, byte[] datos, String contentType) {
+        if (!habilitado() || datos == null || datos.length == 0) {
+            return null;
+        }
+        try {
+            cliente().putObject(PutObjectRequest.builder()
+                    .bucket(bucket).key(key).contentType(contentType)
+                    .serverSideEncryption("AES256")
+                    .build(), RequestBody.fromBytes(datos));
+            return key;
+        } catch (RuntimeException e) {
+            log.warn("No se pudo guardar {} en S3: {}", key, e.getMessage());
+            return null;
+        }
+    }
+
+    public byte[] leer(String key) {
+        exigirHabilitado();
+        try {
+            return cliente().getObjectAsBytes(GetObjectRequest.builder().bucket(bucket).key(key).build()).asByteArray();
+        } catch (RuntimeException e) {
+            log.error("No se pudo leer {} de S3: {}", key, e.getMessage(), e);
+            throw new ServicioExternoException("No se pudo abrir el documento guardado.");
+        }
+    }
+
     /** URL temporal (10 min) para ver el comprobante. */
     public String urlTemporal(String key) {
         exigirHabilitado();

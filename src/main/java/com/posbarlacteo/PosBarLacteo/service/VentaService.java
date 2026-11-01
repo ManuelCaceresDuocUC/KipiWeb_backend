@@ -345,7 +345,6 @@ public class VentaService {
             aviso.append("El cliente ya había abonado parte de esta deuda: tiene $")
                  .append(Math.round(excedenteCliente)).append(" a su favor que debes devolverle. ");
         }
-        aviso.append("Si la venta tenía boleta electrónica, emite la nota de crédito desde tu proveedor de facturación.");
         r.put("aviso", aviso.toString());
         return r;
     }

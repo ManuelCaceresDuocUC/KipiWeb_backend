@@ -1,29 +1,39 @@
-# KIPIPOS · Etapa 3B (backend) — Tickets 80 mm, correo y comprobantes (S3)
+# KIPIPOS · Etapa 4 (backend) — Facturación electrónica multi-proveedor
 
-**Estado de verificación:** NO fue compilado en mi entorno (sin acceso a Maven Central). Solo revisión de sintaxis con javac: sin errores de sintaxis; los errores restantes son por dependencias que faltan allí (Spring, Lombok, AWS SDK, OpenPDF). **No pude probar** la subida a S3, el envío por Gmail ni la generación real de los PDF. Compila tú: `./mvnw -DskipTests compile` y pásame lo que salga.
+**Estado de verificación:** NO fue compilado (sin acceso a Maven Central). Solo revisión de sintaxis con javac, sin errores de sintaxis. El cifrado AES-GCM sí lo probé aislado (cifra, descifra, detecta alteraciones, lee valores antiguos sin cifrar). **La emisión contra Haulmer y LibreDTE no pude probarla**: hay que probarla en sandbox (ver "Qué probar").
 
-## Qué hace
-- **Tickets 80 mm.** El alto de la página se ajusta al contenido (antes era fijo de 1200 pt y salía papel en blanco). El ticket muestra el desglose cuando el pago es mixto.
-- **Vale de crédito y comprobante de abono** ahora se generan en memoria y se devuelven en base64 (`valePdf` en la venta, `comprobantePdf` en el abono). Se elimina la impresión desde el servidor (en Render no hay impresora) y los archivos en disco.
-- **Reimprimir:** `GET /api/ventas/{id}/ticket` y `GET /api/ventas/{id}/vale`.
-- **Correo (Gmail):** `POST /api/ventas/{id}/ticket/enviar` y `POST /api/clientes/{id}/estado-cuenta/enviar` (envía el estado de cuenta en PDF; si no se indica correo usa el del cliente).
-- **Comprobante de transferencia:** `POST /api/ventas/{id}/comprobante` (multipart, `file` y `pagoId` opcional) y `GET /api/ventas/{id}/comprobantes` (URL firmada de 10 min). Valida por el contenido real del archivo (JPG, PNG, WEBP, PDF; máx. 5 MB), guarda en S3 con cifrado y nunca expone el bucket. Al reemplazar un comprobante se borra el anterior. La clave del objeto no se envía al navegador (solo `tieneComprobante`).
-- No hay cambios de tablas: las columnas `comprobante_*` de `pos_ventas_pagos` ya se crearon en la 3A. **No hay SQL.**
+## ANTES de desplegar (obligatorio)
+1. **Borra** `src/main/java/com/posbarlacteo/PosBarLacteo/service/OpenFacturaService.java` (ver ELIMINAR.txt). Si queda, no compila.
+2. **Crea la clave de cifrado** y guárdala en Render → Environment como `DTE_ENCRYPTION_KEY`. En PowerShell, línea por línea:
+```
+$b = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+[Convert]::ToBase64String($b)
+```
+   Copia el resultado a Render y **respáldalo en un administrador de contraseñas**. Si se pierde, las API keys guardadas no se pueden recuperar y cada cliente debe volver a ingresarlas. Sin esta variable el servidor arranca, pero se niega a guardar API keys.
+3. Despliega el backend. En el log de arranque debe aparecer "Se cifraron las API keys DTE de N configuración(es)": las llaves que ya estaban en texto plano se cifran solas (repetible).
 
-## Variables de entorno nuevas (Render → Environment)
-| Variable | Valor |
-|---|---|
-| `S3_BUCKET` | nombre del bucket |
-| `S3_REGION` | región del bucket (ej. `sa-east-1`) |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | claves del usuario IAM (solo permisos sobre ese bucket) |
-| `MAIL_USERNAME` | la cuenta Gmail de la app |
-| `MAIL_PASSWORD` | la "contraseña de aplicación" de 16 letras (no la clave normal) |
+## Qué cambia
+- **Strategy por proveedor** (paquete `dte`): interfaz `DteProveedor` + registro. Hoy: `OpenFacturaProveedor` y `LibreDteProveedor` (beta). Para un proveedor nuevo: una clase `@Component` que implemente la interfaz; no se toca nada más.
+- **API keys cifradas** (AES-256-GCM) en la base; nunca vuelven al navegador ni a los logs.
+- **Prueba de conexión real** contra el proveedor. Si el proveedor no da una respuesta concluyente, lo dice (no afirma que la llave sea buena).
+- **Corrección importante:** la URL de producción de Haulmer era `/v2/dte/issue`, que la documentación no lista; ahora es `https://api.haulmer.com/v2/dte/document` (sandbox: `dev-api.haulmer.com`).
+- **Si el proveedor falla, la venta NO se rompe:** antes devolvía error aunque la venta ya estaba cobrada. Ahora queda registrada, se imprime el comprobante interno con un aviso, y la boleta queda `PENDIENTE` (reintentable) o `REVISAR` (no se sabe si salió; hay que verificar en el portal antes de reintentar, para no duplicar).
+- **Folio y estado guardados** (`pos_documentos_dte` y `pos_ventas.dte_estado/dte_folio`). Una restricción única y un "candado" evitan emitir dos veces la misma boleta aunque se haga doble clic. Copia del PDF de la boleta en S3 (si está configurado).
+- **Nota de crédito automática al anular** una venta con boleta emitida. Si falla, la anulación igual queda y la nota queda pendiente de reintento (admin). Si la boleta nunca había salido, se cancela y no se emite nada.
+- Endpoints nuevos: `POST /api/ventas/{id}/boleta/reintentar`, `GET /api/ventas/{id}/boleta`, `POST /api/ventas/{id}/nota-credito/reintentar` (admin), `GET /api/dte/proveedores`, `GET /api/dte/pendientes`.
+- Tablas/columnas nuevas las crea Hibernate solo. No hay SQL.
 
-Opcionales: `S3_ENDPOINT` (solo si usas un servicio compatible como R2), `MAIL_HOST`, `MAIL_PORT`.
-Sin estas variables la app arranca igual: subir comprobantes o enviar correos responde un mensaje claro de "no configurado".
+## Qué probar (en sandbox, antes de dar esto a un cliente)
+1. Config DTE → Haulmer → ambiente **Sandbox** → llave de pruebas → "Probar conexión". Si dice "no se pudo confirmar", no es grave: lo definitivo es el paso 2.
+2. Vender en efectivo: debe imprimir la boleta 80 mm y mostrarse en Movimientos con su folio. **Si no aparece folio**, mándame la respuesta de Haulmer (el log del servidor muestra las claves recibidas).
+3. Poner una API key mala y vender: la venta debe quedar registrada con aviso, "BOLETA PENDIENTE" en Movimientos. Corregir la llave y "Reintentar boleta".
+4. Anular esa venta (admin): debe emitir la nota de crédito. **No verificado:** que Haulmer acepte una nota de crédito (tipo 61) que referencie una *boleta* con receptor genérico. Consulta con tu contador/proveedor si el SII lo exige distinto.
+5. LibreDTE: sin probar. Los datos de la respuesta de "generar" y si en boletas los precios van con IVA incluido los validamos en la primera prueba real.
 
 ## Ojo
-- **Reimprimir ticket** entrega el comprobante interno de la venta, no la boleta electrónica del proveedor DTE (eso se revisa en la etapa 4).
-- Gmail limita el envío (unos 500 correos/día en cuentas normales). Para volumen alto habrá que pasar a un servicio de correo transaccional.
-- El bucket debe ser **privado** (bloquear todo el acceso público).
-- Si cambias de región o bucket, los comprobantes ya subidos no se mueven solos.
+- La emisión de Haulmer ahora pide también `FOLIO` en la respuesta; si el proveedor lo rechazara, se reintenta sin él automáticamente.
+- Haulmer limita a 3 solicitudes/segundo y 100/minuto por llave.
+- Pago mixto con crédito: la boleta se emite por el total de la venta (decisión de la 3A).
+- Venta con boleta emitida cuyo proveedor luego se cambia: la nota de crédito no se emite sola (avisa que debe hacerse en el portal del proveedor original).
+- Si la respuesta del proveedor se pierde (corte justo al emitir), el documento queda `REVISAR` a propósito; no se reintenta solo.

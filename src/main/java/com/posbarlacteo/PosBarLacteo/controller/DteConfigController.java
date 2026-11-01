@@ -1,5 +1,7 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
@@ -11,29 +13,56 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.posbarlacteo.PosBarLacteo.dte.DteProveedorRegistry;
+import com.posbarlacteo.PosBarLacteo.dte.ResultadoPrueba;
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.model.ConfiguracionDte;
 import com.posbarlacteo.PosBarLacteo.repository.ConfiguracionDteRepository;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.DteService;
+import com.posbarlacteo.PosBarLacteo.util.CifradoClaves;
 
 /**
  * Configuración DTE de la empresa del token (solo ADMIN, ver SecurityConfig).
- * La API Key nunca viaja de vuelta al navegador: solo "configurada" y los últimos 4 caracteres.
+ * La API Key se guarda CIFRADA y nunca viaja de vuelta al navegador: solo "configurada" y los últimos 4 caracteres.
  */
 @RestController
 @RequestMapping("/api/dte")
 public class DteConfigController {
 
-    private final ConfiguracionDteRepository repository;
+    private static final int MAX_LLAVE = 120; // el valor cifrado debe caber en la columna de 255
 
-    public DteConfigController(ConfiguracionDteRepository repository) {
+    private final ConfiguracionDteRepository repository;
+    private final DteProveedorRegistry registry;
+    private final DteService dteService;
+
+    public DteConfigController(ConfiguracionDteRepository repository, DteProveedorRegistry registry, DteService dteService) {
         this.repository = repository;
+        this.registry = registry;
+        this.dteService = dteService;
+    }
+
+    /** Proveedores disponibles para el selector del frontend. */
+    @GetMapping("/proveedores")
+    public List<Map<String, Object>> proveedores() {
+        return registry.todos().stream().map(p -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("codigo", p.codigo());
+            m.put("nombre", p.nombre());
+            m.put("verificado", p.verificado());
+            return m;
+        }).toList();
     }
 
     @GetMapping("/configuracion")
     public ResponseEntity<ConfiguracionDte> getConfiguracion() {
-        return repository.findByEmpresaId(SecurityUtils.actual().empresaId())
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+        try {
+            return repository.findByEmpresaId(SecurityUtils.actual().empresaId())
+                    .map(ResponseEntity::ok)
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            throw new NegocioException("No se pudo leer la configuración guardada: " + e.getMessage());
+        }
     }
 
     /** Compatibilidad con el frontend anterior: el id de la URL se ignora, manda el token. */
@@ -46,18 +75,40 @@ public class DteConfigController {
     @Transactional
     public ResponseEntity<?> guardarConfiguracion(@RequestBody ConfiguracionDte payload) {
         Long empresaId = SecurityUtils.actual().empresaId();
-        ConfiguracionDte config = repository.findByEmpresaId(empresaId).orElseGet(ConfiguracionDte::new);
+
+        String proveedor = payload.getProveedor() == null ? "ninguno" : payload.getProveedor().trim().toLowerCase();
+        if (!"ninguno".equals(proveedor) && registry.buscar(proveedor).isEmpty()) {
+            throw new NegocioException("El proveedor \"" + payload.getProveedor() + "\" no está soportado.");
+        }
+        boolean llaveNueva = payload.getApiKey() != null && !payload.getApiKey().isBlank();
+        boolean secretNuevo = payload.getApiSecret() != null && !payload.getApiSecret().isBlank();
+        if ((llaveNueva || secretNuevo) && !CifradoClaves.disponible()) {
+            throw new NegocioException("El servidor no tiene configurada la clave de cifrado (DTE_ENCRYPTION_KEY). "
+                    + "Por seguridad no se guardan API keys sin cifrar.");
+        }
+        if ((llaveNueva && payload.getApiKey().trim().length() > MAX_LLAVE)
+                || (secretNuevo && payload.getApiSecret().trim().length() > MAX_LLAVE)) {
+            throw new NegocioException("La API Key es demasiado larga. Revisa que hayas pegado solo la llave.");
+        }
+
+        ConfiguracionDte config;
+        try {
+            config = repository.findByEmpresaId(empresaId).orElseGet(ConfiguracionDte::new);
+        } catch (IllegalStateException e) {
+            throw new NegocioException("No se pudo leer la configuración guardada: " + e.getMessage()
+                    + " Si cambió la clave de cifrado, ingresa la API Key nuevamente.");
+        }
 
         config.setEmpresaId(empresaId);
-        config.setProveedor(payload.getProveedor());
+        config.setProveedor(proveedor);
         // Llave en blanco = conservar la que ya estaba guardada
-        if (payload.getApiKey() != null && !payload.getApiKey().isBlank()) {
+        if (llaveNueva) {
             config.setApiKey(payload.getApiKey().trim());
         }
-        if (payload.getApiSecret() != null && !payload.getApiSecret().isBlank()) {
+        if (secretNuevo) {
             config.setApiSecret(payload.getApiSecret().trim());
         }
-        config.setRutEmisor(payload.getRutEmisor());
+        config.setRutEmisor(payload.getRutEmisor() == null ? null : payload.getRutEmisor().trim());
         config.setAmbiente(payload.getAmbiente());
         config.setEmitirBoletaEfectivo(payload.isEmitirBoletaEfectivo());
         config.setEmitirBoletaTarjeta(payload.isEmitirBoletaTarjeta());
@@ -68,20 +119,22 @@ public class DteConfigController {
     }
 
     /**
-     * Por ahora solo valida que haya una llave (la enviada o la ya guardada). NO contacta al proveedor,
-     * y el mensaje lo dice con claridad. La verificación real llega con la arquitectura multi-proveedor (Etapa 4).
+     * Consulta real al proveedor elegido. "verificado=false" significa que el proveedor no dio una respuesta
+     * concluyente: no se afirma que la llave sea buena ni mala.
      */
     @PostMapping("/probar-conexion")
     public ResponseEntity<?> probarConexion(@RequestBody ConfiguracionDte payload) {
-        String llave = payload.getApiKey();
-        if (llave == null || llave.isBlank()) {
-            llave = repository.findByEmpresaId(SecurityUtils.actual().empresaId())
-                    .map(ConfiguracionDte::getApiKey).orElse(null);
-        }
-        if (llave == null || llave.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("valido", false, "mensaje", "La API Key no puede estar vacía"));
-        }
-        return ResponseEntity.ok(Map.of("valido", true,
-                "mensaje", "Llave recibida. Aún no se verificó contra el proveedor; la verificación real se habilitará próximamente."));
+        ResultadoPrueba r = dteService.probarConexion(SecurityUtils.actual().empresaId(), payload);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("valido", r.valido());
+        m.put("verificado", r.verificado());
+        m.put("mensaje", r.mensaje());
+        return ResponseEntity.ok(m);
+    }
+
+    /** Documentos DTE que requieren atención (pendientes de reintento o por revisar). */
+    @GetMapping("/pendientes")
+    public List<Map<String, Object>> pendientes() {
+        return dteService.pendientes(SecurityUtils.actual().empresaId());
     }
 }

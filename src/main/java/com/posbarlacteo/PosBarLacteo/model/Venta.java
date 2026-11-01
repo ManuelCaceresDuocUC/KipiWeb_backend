@@ -66,6 +66,13 @@ public class Venta {
     @Column(name = "motivo_anulacion", length = 255)
     private String motivoAnulacion;
 
+    /** EMITIDO | PENDIENTE | REVISAR | CANCELADO; null si la venta no lleva boleta electrónica. */
+    @Column(name = "dte_estado", length = 20)
+    private String dteEstado;
+
+    @Column(name = "dte_folio")
+    private Long dteFolio;
+
     @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL)
     @com.fasterxml.jackson.annotation.JsonManagedReference("pagos")
     private List<PagoVenta> pagos;

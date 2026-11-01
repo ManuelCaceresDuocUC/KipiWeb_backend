@@ -23,11 +23,13 @@ public class ConfiguracionDte {
 
     @ToString.Exclude
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Convert(converter = ClaveCifradaConverter.class)
     @Column(name = "api_key", length = 255)
     private String apiKey;
 
     @ToString.Exclude
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Convert(converter = ClaveCifradaConverter.class)
     @Column(name = "api_secret", length = 255)
     private String apiSecret;
 

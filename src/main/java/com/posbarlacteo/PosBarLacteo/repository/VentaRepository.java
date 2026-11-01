@@ -49,4 +49,11 @@ public interface VentaRepository extends JpaRepository<Venta, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT v FROM Venta v WHERE v.id = :id AND v.empresa.id = :empresaId")
     Optional<Venta> buscarConBloqueo(@Param("id") Long id, @Param("empresaId") Long empresaId);
+
+    /** Actualiza solo el estado DTE (no toca ningún otro campo de la venta). */
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = false)
+    @Query("UPDATE Venta v SET v.dteEstado = :estado, v.dteFolio = :folio WHERE v.id = :id AND v.empresa.id = :empresaId")
+    int actualizarDte(@Param("id") Long id, @Param("empresaId") Long empresaId,
+                      @Param("estado") String estado, @Param("folio") Long folio);
 }

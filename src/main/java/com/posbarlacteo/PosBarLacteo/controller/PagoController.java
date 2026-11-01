@@ -100,14 +100,18 @@ public class PagoController {
         }
 
         Set<String> metodos = venta.getPagos().stream().map(PagoVenta::getMetodo).collect(Collectors.toSet());
-        String base64Pdf = dteService.obtenerDocumentoVenta(venta, request, metodos);
+        DteService.Emision doc = dteService.documentoDeVenta(venta, request, metodos, p);
 
         Map<String, Object> cuerpo = new LinkedHashMap<>();
         cuerpo.put("status", "success");
         cuerpo.put("message", mensaje);
         cuerpo.put("ventaId", venta.getId());
         cuerpo.put("metodoPago", venta.getMetodoPago());
-        cuerpo.put("boletaPdf", base64Pdf == null ? "" : base64Pdf);
+        cuerpo.put("boletaPdf", doc.pdf() == null ? "" : doc.pdf());
+        // Estado de la boleta electrónica: EMITIDO | PENDIENTE | REVISAR | NO_APLICA (venta sin boleta)
+        cuerpo.put("dteEstado", doc.estado());
+        cuerpo.put("dteFolio", doc.folio());
+        cuerpo.put("dteAviso", doc.aviso() == null ? "" : doc.aviso());
         // Venta con parte a crédito: vale con firma para imprimir junto al ticket
         String vale = null;
         if (metodos.contains(PagoVenta.CREDITO)) {
@@ -127,6 +131,8 @@ public class PagoController {
         cuerpo.put("metodoPago", venta.getMetodoPago());
         cuerpo.put("boletaPdf", "");
         cuerpo.put("valePdf", "");
+        cuerpo.put("dteEstado", "");
+        cuerpo.put("dteAviso", "");
         cuerpo.put("tieneTransferencia", false);
         return ResponseEntity.ok(cuerpo);
     }
