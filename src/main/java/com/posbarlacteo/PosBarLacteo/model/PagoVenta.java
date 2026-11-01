@@ -62,8 +62,9 @@ public class PagoVenta {
     @Column(name = "fecha_confirmacion")
     private LocalDateTime fechaConfirmacion;
 
-    /** Clave del objeto en el bucket (R2) del comprobante adjunto; se completa en la etapa 3B. */
+    /** Clave del objeto en el bucket S3 del comprobante adjunto. Interna: no se envía al navegador. */
     @Column(name = "comprobante_key", length = 255)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String comprobanteKey;
 
     @Column(name = "comprobante_nombre", length = 255)
@@ -71,4 +72,10 @@ public class PagoVenta {
 
     @Column(name = "comprobante_tipo", length = 100)
     private String comprobanteTipo;
+
+    /** El navegador solo necesita saber si hay comprobante adjunto. */
+    @com.fasterxml.jackson.annotation.JsonProperty("tieneComprobante")
+    public boolean tieneComprobante() {
+        return comprobanteKey != null && !comprobanteKey.isBlank();
+    }
 }

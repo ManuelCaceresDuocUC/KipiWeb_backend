@@ -58,7 +58,6 @@ public class VentaService {
     private final ClienteRepository clienteRepository;
     private final CuentaClienteService cuentaClienteService;
     private final MovimientoCajaRepository movimientoCajaRepository;
-    private final ValeCreditoPdfService valeCreditoPdfService;
     private final InventarioService inventarioService;
 
     public VentaService(ProductoRepository productoRepository, RecetaRepository recetaRepository,
@@ -66,7 +65,7 @@ public class VentaService {
                         UsuarioRepository usuarioRepository, ClienteRepository clienteRepository,
                         CuentaClienteService cuentaClienteService,
                         MovimientoCajaRepository movimientoCajaRepository,
-                        ValeCreditoPdfService valeCreditoPdfService, InventarioService inventarioService) {
+                        InventarioService inventarioService) {
         this.productoRepository = productoRepository;
         this.recetaRepository = recetaRepository;
         this.ventaRepository = ventaRepository;
@@ -75,7 +74,6 @@ public class VentaService {
         this.clienteRepository = clienteRepository;
         this.cuentaClienteService = cuentaClienteService;
         this.movimientoCajaRepository = movimientoCajaRepository;
-        this.valeCreditoPdfService = valeCreditoPdfService;
         this.inventarioService = inventarioService;
     }
 
@@ -244,13 +242,6 @@ public class VentaService {
             throw new NegocioException("El turno de caja ya no está abierto.");
         }
 
-        if (montoCredito > 0) {
-            try {
-                valeCreditoPdfService.generarGuardarYImprimirVale(venta, venta.getEmpresa().getRazonSocial());
-            } catch (Exception e) {
-                log.warn("No se pudo generar el vale de crédito de la venta {}: {}", venta.getId(), e.getMessage());
-            }
-        }
         return venta;
     }
 

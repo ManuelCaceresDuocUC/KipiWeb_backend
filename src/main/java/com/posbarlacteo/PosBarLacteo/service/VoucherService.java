@@ -1,11 +1,9 @@
 package com.posbarlacteo.PosBarLacteo.service;
 
-import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Method;
 import java.text.NumberFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,12 +20,12 @@ import com.lowagie.text.Paragraph;
 import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
-import com.lowagie.text.pdf.PdfWriter;
 import com.posbarlacteo.PosBarLacteo.model.Empresa;
 import com.posbarlacteo.PosBarLacteo.model.Producto;
 import com.posbarlacteo.PosBarLacteo.model.Venta;
 import com.posbarlacteo.PosBarLacteo.model.VentaDetalle;
 import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
+import com.posbarlacteo.PosBarLacteo.util.PdfTicketUtil;
 
 @Service
 public class VoucherService {
@@ -35,31 +33,20 @@ public class VoucherService {
     @Autowired(required = false)
     private ProductoRepository productoRepository;
 
+    /** Ticket 80 mm con las dos copias; el alto de la página se ajusta al contenido. */
     public String generarVoucherBase64(Venta venta, List<?> items) throws Exception {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-
-            Rectangle pageSize = new Rectangle(226, 1200); 
-            Document document = new Document(pageSize, 8, 8, 10, 10);
-            PdfWriter.getInstance(document, baos);
-
-            document.open();
-
+        return PdfTicketUtil.generarBase64(document -> {
             // 1. COPIA CLIENTE
             agregarCopiaVoucher(document, venta, items, "COPIA CLIENTE");
 
-            // Separador visible
-            Paragraph separador = new Paragraph("\n--------------------------------------------\n\n", 
-                    FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8));
+            Paragraph separador = new Paragraph("\n- - - - - - - cortar aquí - - - - - - -\n",
+                    FontFactory.getFont(FontFactory.HELVETICA, 8));
             separador.setAlignment(Element.ALIGN_CENTER);
             document.add(separador);
 
             // 2. COPIA LOCAL / CONTROL INTERNO
             agregarCopiaVoucher(document, venta, items, "COPIA LOCAL / CONTROL INTERNO");
-
-            document.close();
-
-            return Base64.getEncoder().encodeToString(baos.toByteArray());
-        }
+        });
     }
 
     private void agregarCopiaVoucher(Document doc, Venta venta, List<?> items, String tipoCopia) throws Exception {
@@ -114,7 +101,7 @@ public class VoucherService {
 
         doc.add(new Paragraph("Venta N°: " + (ventaId != null ? ventaId : "S/N"), fontBold));
         doc.add(new Paragraph("Fecha: " + fechaVenta.format(formatFecha), fontBody));
-        doc.add(new Paragraph("Método Pago: " + metodo, fontBody));
+        doc.add(new Paragraph(descripcionPagos(venta, metodo, formatMoneda), fontBody));
         doc.add(new Paragraph("--------------------------------------------", fontBody));
 
         // --- TABLA DE PRODUCTOS ---
@@ -173,6 +160,22 @@ public class VoucherService {
         Paragraph gracias = new Paragraph("¡Gracias por su preferencia!\n", fontBody);
         gracias.setAlignment(Element.ALIGN_CENTER);
         doc.add(gracias);
+    }
+
+    /** "Método Pago: EFECTIVO" o, con pago mixto, una línea por medio con su monto. */
+    private String descripcionPagos(Venta venta, String metodoPorDefecto, NumberFormat moneda) {
+        try {
+            if (venta != null && venta.getPagos() != null && venta.getPagos().size() > 1) {
+                StringBuilder sb = new StringBuilder("Pagos:");
+                for (com.posbarlacteo.PosBarLacteo.model.PagoVenta p : venta.getPagos()) {
+                    sb.append("\n  ").append(p.getMetodo()).append(": ").append(moneda.format(p.getMonto() != null ? p.getMonto() : 0L));
+                }
+                return sb.toString();
+            }
+        } catch (Exception ignorado) {
+            // pagos no disponibles (sesión cerrada): se usa el método general
+        }
+        return "Método Pago: " + metodoPorDefecto;
     }
 
     // --- MÉTODOS DE EXTRACCIÓN Y RESPALDO ---

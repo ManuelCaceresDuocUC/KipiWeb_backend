@@ -1,28 +1,29 @@
-# KIPIPOS · Etapa 3A (backend) — Ventas y caja
+# KIPIPOS · Etapa 3B (backend) — Tickets 80 mm, correo y comprobantes (S3)
 
-**Estado de verificación:** NO fue compilado en mi entorno (sin acceso a Maven Central). Solo revisión de sintaxis con javac: sin errores de sintaxis; los errores restantes son por dependencias que faltan en mi entorno (Spring, Lombok). Compila tú: `./mvnw -DskipTests compile` y pásame lo que salga.
-
-**Si tuviste que corregir algo a mano en los archivos de la etapa 2**, no copies encima los que se repiten (`InventarioService`, `MovimientoInventario`, `Empresa`, `MovimientoInventarioRepository`): aplica `etapa3a.patch` o pásame tus versiones.
+**Estado de verificación:** NO fue compilado en mi entorno (sin acceso a Maven Central). Solo revisión de sintaxis con javac: sin errores de sintaxis; los errores restantes son por dependencias que faltan allí (Spring, Lombok, AWS SDK, OpenPDF). **No pude probar** la subida a S3, el envío por Gmail ni la generación real de los PDF. Compila tú: `./mvnw -DskipTests compile` y pásame lo que salga.
 
 ## Qué hace
-- **Pagos mixtos.** Nueva tabla `pos_ventas_pagos`: una venta puede pagarse con varios medios (efectivo, tarjeta, transferencia, crédito). La suma debe ser igual al total o el servidor rechaza la venta. Endpoint nuevo `POST /api/pagos/venta` (los antiguos `/efectivo`, `/cobrar`, `/credito` siguen funcionando). `pos_ventas.metodo_pago` queda como el medio único o `MIXTO`.
-- **Transferencia.** El cajero debe confirmar que el dinero llegó. Lleva N° de referencia opcional. El total del turno tiene columna propia (`ventas_transferencia`) y no entra al cajón. Los comprobantes adjuntos llegan en la 3B.
-- **Fiado por empresa** (`empresas.permite_fiado`, apagado por defecto) **con límite estricto por cliente**: se valida en la base con un UPDATE atómico, así dos ventas simultáneas no pueden pasarse del límite. Límite $0 = sin crédito. `PATCH /api/clientes/{id}` (admin) cambia el límite.
-- **Estado de cuenta del cliente** (`cliente_movimientos`): cada cargo, abono, anulación y ajuste con su saldo. `GET /api/clientes/{id}/movimientos`. Los abonos también aceptan transferencia y son atómicos.
-- **Anulación de ventas** (solo admin): `POST /api/ventas/{id}/anular` con motivo. Repone exactamente el stock que descontó, revierte la deuda del cliente y, si el turno sigue abierto, corrige sus totales. Si el turno ya estaba cerrado NO lo modifica y avisa para que registres el retiro del efectivo devuelto. No emite nota de crédito: eso viene con la etapa 4 (DTE).
-- **Auditoría de caja** (`movimientos_caja`): ingresos, retiros, abonos y anulaciones quedan con motivo, usuario y hora. Ahora el motivo es obligatorio. `GET /api/caja/movimientos` (turno actual) y `GET /api/caja/historial/{turnoId}/movimientos` (admin).
-- **Idempotencia:** el frontend manda una clave por intento de cobro (`pos_ventas.idempotency_key`, única por empresa). Si se corta la red y reintentan, devuelve la venta ya registrada en vez de cobrar doble.
-- Los totales del turno se suman con un UPDATE atómico (ya no se pisan entre sí) y el dashboard excluye las ventas anuladas.
-- Cuando hay pago mixto, la boleta electrónica se emite si ALGUNO de los medios usados está configurado para emitir (el fiado nunca emite).
+- **Tickets 80 mm.** El alto de la página se ajusta al contenido (antes era fijo de 1200 pt y salía papel en blanco). El ticket muestra el desglose cuando el pago es mixto.
+- **Vale de crédito y comprobante de abono** ahora se generan en memoria y se devuelven en base64 (`valePdf` en la venta, `comprobantePdf` en el abono). Se elimina la impresión desde el servidor (en Render no hay impresora) y los archivos en disco.
+- **Reimprimir:** `GET /api/ventas/{id}/ticket` y `GET /api/ventas/{id}/vale`.
+- **Correo (Gmail):** `POST /api/ventas/{id}/ticket/enviar` y `POST /api/clientes/{id}/estado-cuenta/enviar` (envía el estado de cuenta en PDF; si no se indica correo usa el del cliente).
+- **Comprobante de transferencia:** `POST /api/ventas/{id}/comprobante` (multipart, `file` y `pagoId` opcional) y `GET /api/ventas/{id}/comprobantes` (URL firmada de 10 min). Valida por el contenido real del archivo (JPG, PNG, WEBP, PDF; máx. 5 MB), guarda en S3 con cifrado y nunca expone el bucket. Al reemplazar un comprobante se borra el anterior. La clave del objeto no se envía al navegador (solo `tieneComprobante`).
+- No hay cambios de tablas: las columnas `comprobante_*` de `pos_ventas_pagos` ya se crearon en la 3A. **No hay SQL.**
 
-## Orden de despliegue
-1. Despliega el backend (Hibernate crea tablas y columnas).
-2. Corre `sql/05_etapa3a_datos_existentes.sql` en Railway: enciende el fiado solo en las empresas que ya lo usaban, y crea la línea de pago de las ventas antiguas. Repetible.
-3. Despliega el frontend (zip aparte). Si el frontend nuevo sale antes que el backend, el cobro falla (endpoint nuevo).
+## Variables de entorno nuevas (Render → Environment)
+| Variable | Valor |
+|---|---|
+| `S3_BUCKET` | nombre del bucket |
+| `S3_REGION` | región del bucket (ej. `sa-east-1`) |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | claves del usuario IAM (solo permisos sobre ese bucket) |
+| `MAIL_USERNAME` | la cuenta Gmail de la app |
+| `MAIL_PASSWORD` | la "contraseña de aplicación" de 16 letras (no la clave normal) |
+
+Opcionales: `S3_ENDPOINT` (solo si usas un servicio compatible como R2), `MAIL_HOST`, `MAIL_PORT`.
+Sin estas variables la app arranca igual: subir comprobantes o enviar correos responde un mensaje claro de "no configurado".
 
 ## Ojo
-- **Fiado apagado por defecto.** Se activa en Administración → Gestión de Cartera.
-- Revisa la consulta (c) del SQL: clientes que ya deben más que su límite. Podrán pagar, pero no comprar más a crédito hasta bajar la deuda.
-- Ventas anteriores a la etapa 2 no tienen historial de stock: al anularlas no reponen inventario.
-- Los vales de crédito se siguen intentando imprimir desde el servidor (no hay impresora en Render; falla sin romper la venta). La impresión real llega en la 3B.
-- `etapa3a.patch` es el diff completo respecto a la etapa 2.
+- **Reimprimir ticket** entrega el comprobante interno de la venta, no la boleta electrónica del proveedor DTE (eso se revisa en la etapa 4).
+- Gmail limita el envío (unos 500 correos/día en cuentas normales). Para volumen alto habrá que pasar a un servicio de correo transaccional.
+- El bucket debe ser **privado** (bloquear todo el acceso público).
+- Si cambias de región o bucket, los comprobantes ya subidos no se mueven solos.

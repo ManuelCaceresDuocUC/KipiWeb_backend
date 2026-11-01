@@ -22,6 +22,7 @@ import com.posbarlacteo.PosBarLacteo.model.Venta;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 import com.posbarlacteo.PosBarLacteo.service.DteService;
+import com.posbarlacteo.PosBarLacteo.service.ValeCreditoPdfService;
 import com.posbarlacteo.PosBarLacteo.service.VentaService;
 
 /** Los errores de negocio los traduce GlobalExceptionHandler a {"message": "..."} con el código HTTP correcto. */
@@ -31,10 +32,12 @@ public class PagoController {
 
     private final VentaService ventaService;
     private final DteService dteService;
+    private final ValeCreditoPdfService valeService;
 
-    public PagoController(VentaService ventaService, DteService dteService) {
+    public PagoController(VentaService ventaService, DteService dteService, ValeCreditoPdfService valeService) {
         this.ventaService = ventaService;
         this.dteService = dteService;
+        this.valeService = valeService;
     }
 
     /** Endpoint principal: una o varias formas de pago (request.pagos) que deben sumar el total. */
@@ -105,6 +108,14 @@ public class PagoController {
         cuerpo.put("ventaId", venta.getId());
         cuerpo.put("metodoPago", venta.getMetodoPago());
         cuerpo.put("boletaPdf", base64Pdf == null ? "" : base64Pdf);
+        // Venta con parte a crédito: vale con firma para imprimir junto al ticket
+        String vale = null;
+        if (metodos.contains(PagoVenta.CREDITO)) {
+            vale = valeService.generarValeBase64(venta,
+                    venta.getEmpresa() != null ? venta.getEmpresa().getRazonSocial() : null);
+        }
+        cuerpo.put("valePdf", vale == null ? "" : vale);
+        cuerpo.put("tieneTransferencia", metodos.contains(PagoVenta.TRANSFERENCIA));
         return ResponseEntity.ok(cuerpo);
     }
 
@@ -115,6 +126,8 @@ public class PagoController {
         cuerpo.put("ventaId", venta.getId());
         cuerpo.put("metodoPago", venta.getMetodoPago());
         cuerpo.put("boletaPdf", "");
+        cuerpo.put("valePdf", "");
+        cuerpo.put("tieneTransferencia", false);
         return ResponseEntity.ok(cuerpo);
     }
 }

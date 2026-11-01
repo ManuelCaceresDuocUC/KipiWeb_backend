@@ -31,6 +31,8 @@ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 import com.posbarlacteo.PosBarLacteo.service.CajaService;
 import com.posbarlacteo.PosBarLacteo.service.CuentaClienteService;
+import com.posbarlacteo.PosBarLacteo.service.EstadoCuentaPdfService;
+import com.posbarlacteo.PosBarLacteo.service.MailService;
 import com.posbarlacteo.PosBarLacteo.service.ValeCreditoPdfService;
 
 /** Todos los clientes pertenecen a la empresa del token; ningún endpoint recibe empresaId. */
@@ -44,17 +46,22 @@ public class ClienteController {
     private final ValeCreditoPdfService valeCreditoPdfService;
     private final CuentaClienteService cuentaClienteService;
     private final MovimientoClienteRepository movimientoClienteRepository;
+    private final EstadoCuentaPdfService estadoCuentaPdfService;
+    private final MailService mailService;
 
     public ClienteController(ClienteRepository clienteRepository, EmpresaRepository empresaRepository,
                              CajaService cajaService, ValeCreditoPdfService valeCreditoPdfService,
                              CuentaClienteService cuentaClienteService,
-                             MovimientoClienteRepository movimientoClienteRepository) {
+                             MovimientoClienteRepository movimientoClienteRepository,
+                             EstadoCuentaPdfService estadoCuentaPdfService, MailService mailService) {
         this.clienteRepository = clienteRepository;
         this.empresaRepository = empresaRepository;
         this.cajaService = cajaService;
         this.valeCreditoPdfService = valeCreditoPdfService;
         this.cuentaClienteService = cuentaClienteService;
         this.movimientoClienteRepository = movimientoClienteRepository;
+        this.estadoCuentaPdfService = estadoCuentaPdfService;
+        this.mailService = mailService;
     }
 
     @PostMapping
@@ -160,11 +167,43 @@ public class ClienteController {
         cliente.setDeudaActual(saldo);
 
         String local = cliente.getEmpresa() != null ? cliente.getEmpresa().getRazonSocial() : "Local";
-        valeCreditoPdfService.generarGuardarYImprimirAbono(
+        String comprobante = valeCreditoPdfService.generarAbonoBase64(
                 cliente.getNombre(), cliente.getRut(), monto, deudaAntes,
                 saldo, metodoPago, local);
 
-        return ResponseEntity.ok(cliente);
+        Map<String, Object> respuesta = new LinkedHashMap<>();
+        respuesta.put("cliente", cliente);
+        respuesta.put("comprobantePdf", comprobante == null ? "" : comprobante);
+        return ResponseEntity.ok(respuesta);
+    }
+
+    /** Envía por correo el estado de cuenta (últimos 100 movimientos). Body: {"email": "..."} (opcional: usa el del cliente). */
+    @PostMapping("/{id}/estado-cuenta/enviar")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> enviarEstadoCuenta(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
+        AuthPrincipal p = SecurityUtils.actual();
+        Cliente c = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
+        String destino = body != null && body.get("email") != null && !body.get("email").isBlank()
+                ? body.get("email") : c.getEmail();
+        if (destino == null || destino.isBlank()) {
+            throw new NegocioException("El cliente no tiene correo registrado. Ingresa uno para enviar el estado de cuenta.");
+        }
+        destino = MailService.validarDestino(destino);
+
+        String empresa = c.getEmpresa() != null ? c.getEmpresa().getRazonSocial() : "KIPIPOS";
+        List<MovimientoCliente> movs = movimientoClienteRepository
+                .porCliente(id, p.empresaId(), PageRequest.of(0, 100)).getContent();
+        byte[] pdf;
+        try {
+            pdf = estadoCuentaPdfService.generar(empresa, c, movs);
+        } catch (Exception e) {
+            throw new NegocioException("No se pudo generar el estado de cuenta.");
+        }
+        mailService.enviarConAdjunto(destino, empresa, "Estado de cuenta - " + empresa,
+                "Hola " + c.getNombre() + ",\n\nAdjuntamos tu estado de cuenta actualizado en " + empresa + ".\n\nSaludos.",
+                "estado-de-cuenta.pdf", pdf);
+        return ResponseEntity.ok(Map.of("status", "success", "message", "Estado de cuenta enviado a " + destino));
     }
 
     /** Estado de cuenta: resumen del cliente y sus movimientos (cargos, abonos, anulaciones, ajustes). */
