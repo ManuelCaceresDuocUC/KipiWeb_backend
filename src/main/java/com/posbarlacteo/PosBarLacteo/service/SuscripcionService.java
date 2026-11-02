@@ -35,6 +35,9 @@ public class SuscripcionService {
 
     private static final Logger log = LoggerFactory.getLogger(SuscripcionService.class);
 
+    /** Plan único de Flow. */
+    public static final String PLAN_ID = "KIPI";
+
     public static final String PENDIENTE = "PENDIENTE";
     public static final String ACTIVA = "ACTIVA";
     public static final String EN_MORA = "EN_MORA";
@@ -229,8 +232,12 @@ public class SuscripcionService {
     }
 
     /**
-     * Registros cuya tarjeta quedó inscrita en Flow pero cuya suscripción no se guardó (p. ej. falló la base justo
-     * después de crearla). Si Flow tiene una suscripción vigente del cliente, se adopta y se activa la empresa.
+     * Registros PENDIENTES cuyo cliente existe en Flow pero cuya suscripción no quedó guardada. Hay dos casos:
+     *  1) Flow ya tiene una suscripción vigente del cliente (falló la base justo después de crearla): se adopta.
+     *  2) El cliente inscribió su tarjeta pero nunca se creó la suscripción (se cortó el retorno desde Flow, p. ej.
+     *     por cerrar la pestaña o un error de red): se crea ahora, porque al inscribir la tarjeta el cliente autorizó el
+     *     cobro (ver Términos). Sin tarjeta inscrita no se hace nada: es un registro abandonado.
+     * Si Flow no responde, no se toca nada y se reintenta en la siguiente conciliación.
      */
     public List<Empresa> rescatarRegistrosIncompletos(LocalDateTime antesDe) {
         List<Empresa> rescatadas = new ArrayList<>();
@@ -239,30 +246,65 @@ public class SuscripcionService {
                 continue; // muy reciente: puede estar pagando en este momento
             }
             try {
-                Map<String, Object> r = flow.get("/customer/getSubscriptions", mapa("customerId", e.getFlowCustomerId(), "start", "0", "limit", "10"));
-                Object data = r == null ? null : r.get("data");
-                if (data instanceof List<?> lista) {
-                    for (Object o : lista) {
-                        if (o instanceof Map<?, ?> m) {
-                            int st = entero(m.get("status"), -1);
-                            if ((st == 1 || st == 2) && m.get("subscriptionId") != null) {
-                                e.setFlowSubscriptionId(String.valueOf(m.get("subscriptionId")));
-                                e.setEstado(ACTIVA);
-                                e.setActivo(true);
-                                empresaRepository.save(e);
-                                invalidar(e.getId());
-                                rescatadas.add(e);
-                                log.warn("Empresa {} rescatada: tenía suscripción vigente en Flow sin registrar.", e.getId());
-                                break;
-                            }
-                        }
-                    }
+                String subscriptionId = suscripcionVigenteEnFlow(e.getFlowCustomerId());
+                String origen = "tenía suscripción vigente en Flow sin registrar";
+                if (subscriptionId == null && tarjetaInscrita(e.getFlowCustomerId())) {
+                    subscriptionId = crearSuscripcion(e.getFlowCustomerId());
+                    origen = "tenía la tarjeta inscrita pero sin suscripción: se creó";
+                }
+                if (subscriptionId != null) {
+                    e.setFlowSubscriptionId(subscriptionId);
+                    e.setEstado(ACTIVA);
+                    e.setActivo(true);
+                    empresaRepository.save(e);
+                    invalidar(e.getId());
+                    rescatadas.add(e);
+                    log.warn("Empresa {} rescatada: {}.", e.getId(), origen);
                 }
             } catch (RuntimeException ex) {
                 log.warn("No se pudo revisar el registro incompleto de la empresa {}: {}", e.getId(), ex.getMessage());
             }
         }
         return rescatadas;
+    }
+
+    /** Id de una suscripción activa (1) o en prueba (2) del cliente en Flow, o null. */
+    private String suscripcionVigenteEnFlow(String customerId) {
+        Map<String, Object> r = flow.get("/customer/getSubscriptions", mapa("customerId", customerId, "start", "0", "limit", "10"));
+        Object data = r == null ? null : r.get("data");
+        if (data instanceof List<?> lista) {
+            for (Object o : lista) {
+                if (o instanceof Map<?, ?> m) {
+                    int st = entero(m.get("status"), -1);
+                    if ((st == 1 || st == 2) && m.get("subscriptionId") != null) {
+                        return String.valueOf(m.get("subscriptionId"));
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** true si el cliente tiene una tarjeta inscrita en Flow. */
+    private boolean tarjetaInscrita(String customerId) {
+        Map<String, Object> c = flow.get("/customer/get", mapa("customerId", customerId));
+        if (c == null) return false;
+        return noVacio(c.get("creditCardType")) || noVacio(c.get("last4CardDigits"));
+    }
+
+    /** Crea la suscripción al plan; devuelve su id solo si quedó activa o en prueba. Lanza excepción si Flow falla. */
+    private String crearSuscripcion(String customerId) {
+        Map<String, Object> s = flow.post("/subscription/create", mapa("customerId", customerId, "planId", PLAN_ID));
+        int st = s == null ? -1 : entero(s.get("status"), -1);
+        if ((st == 1 || st == 2) && s.get("subscriptionId") != null) {
+            return String.valueOf(s.get("subscriptionId"));
+        }
+        log.warn("Flow no dejó activa la suscripción del cliente {} (status {}).", customerId, st);
+        return null;
+    }
+
+    private static boolean noVacio(Object o) {
+        return o != null && !String.valueOf(o).isBlank() && !"null".equalsIgnoreCase(String.valueOf(o));
     }
 
     // ------------------------------------------------------------------------------------------

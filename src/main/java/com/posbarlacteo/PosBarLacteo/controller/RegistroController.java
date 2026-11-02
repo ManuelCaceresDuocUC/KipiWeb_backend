@@ -71,7 +71,7 @@ public class RegistroController {
     /** Minutos tras los cuales un registro sin pagar se considera abandonado y se puede reemplazar. */
     private static final long MINUTOS_REGISTRO_ABANDONADO = 30;
 
-    private static final String PLAN_ID = "KIPI";
+    private static final String PLAN_ID = com.posbarlacteo.PosBarLacteo.service.SuscripcionService.PLAN_ID;
 
     // ------------------------------------------------------------------
     // REGISTRO
