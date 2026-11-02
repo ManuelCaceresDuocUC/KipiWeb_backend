@@ -167,15 +167,30 @@ public class OpenFacturaProveedor implements DteProveedor {
         encabezado.put("Totales", totales);
         dte.put("Encabezado", encabezado);
 
+        // Boleta: las líneas llevan IVA incluido. Nota de crédito (como toda factura): las líneas van en NETO, porque
+        // el proveedor recalcula neto = suma de líneas e IVA = 19 %. Se ajusta la última línea para que sumen
+        // exactamente MntNeto y los totales cuadren.
+        boolean neto61 = tipoDte == 61;
         List<Map<String, Object>> detalle = new ArrayList<>();
         int n = 1;
+        long sumaNeto = 0;
+        int cantidad = s.lineas().size();
         for (LineaDte l : s.lineas()) {
             Map<String, Object> d = new LinkedHashMap<>();
-            d.put("NroLinDet", n++);
+            d.put("NroLinDet", n);
             d.put("NmbItem", l.nombre());
             d.put("QtyItem", l.cantidad());
-            d.put("PrcItem", l.precioUnitario());
-            d.put("MontoItem", l.monto());
+            if (neto61) {
+                long netoLinea = (n == cantidad) ? neto - sumaNeto : Math.round(l.monto() / 1.19);
+                sumaNeto += netoLinea;
+                double cant = l.cantidad() > 0 ? l.cantidad() : 1;
+                d.put("PrcItem", Math.round(netoLinea / cant * 1_000_000d) / 1_000_000d);
+                d.put("MontoItem", netoLinea);
+            } else {
+                d.put("PrcItem", l.precioUnitario());
+                d.put("MontoItem", l.monto());
+            }
+            n++;
             detalle.add(d);
         }
         dte.put("Detalle", detalle);

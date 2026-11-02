@@ -1,2 +1,2 @@
-# Arreglo: nota de credito en OpenFactura (v2)
-OpenFactura exige el codigo de actividad economica (Acteco) del emisor en la nota de credito, en un orden fijo de campos. Nuevo campo "Actividad economica" en Facturacion Electronica (columna configuracion_dte.acteco, la crea Hibernate). Requiere la Etapa 9. No compilado con Maven.
+# Arreglo: nota de credito en OpenFactura (v3)
+v3: las lineas de la nota de credito van en NETO (OpenFactura calcula neto = suma de lineas e IVA 19%); antes iban con IVA incluido y los totales no cuadraban (OF-10). Incluye v2 (Acteco). Requiere la Etapa 9. No compilado con Maven.
