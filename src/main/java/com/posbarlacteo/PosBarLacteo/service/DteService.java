@@ -78,9 +78,10 @@ public class DteService {
     }
 
     /** Datos tributarios de la empresa tal como quedaron en su registro (null si no se encuentra). */
-    private DatosEmisor datosEmisor(Long empresaId) {
+    private DatosEmisor datosEmisor(Long empresaId, String acteco) {
         return empresaRepository.findById(empresaId)
-                .map(e -> new DatosEmisor(e.getRazonSocial(), e.getGiro(), e.getDireccion(), e.getComuna()))
+                .map(e -> new DatosEmisor(e.getRazonSocial(), e.getGiro(), e.getDireccion(), e.getComuna(),
+                        DatosEmisor.parsearActeco(acteco)))
                 .orElse(null);
     }
 
@@ -279,7 +280,7 @@ public class DteService {
         if (key == null || key.isBlank()) {
             return ResultadoPrueba.rechazada("La API Key no puede estar vacía.");
         }
-        return proveedor.probarConexion(new CredencialesDte(key.trim(), secret, rut, ambiente, datosEmisor(empresaId)));
+        return proveedor.probarConexion(new CredencialesDte(key.trim(), secret, rut, ambiente, datosEmisor(empresaId, payload.getActeco())));
     }
 
     // ------------------------------------------------------------------------------------------
@@ -343,7 +344,7 @@ public class DteService {
             if (config.getRutEmisor() == null || config.getRutEmisor().isBlank()) {
                 throw new DteException("Falta el RUT emisor en la configuración de facturación.");
             }
-            CredencialesDte cred = new CredencialesDte(config.getApiKey(), config.getApiSecret(), config.getRutEmisor(), config.getAmbiente(), datosEmisor(empresaId));
+            CredencialesDte cred = new CredencialesDte(config.getApiKey(), config.getApiSecret(), config.getRutEmisor(), config.getAmbiente(), datosEmisor(empresaId, config.getActeco()));
 
             ResultadoDte r = tipo == DocumentoTributario.BOLETA
                     ? proveedor.emitirBoleta(solicitud, cred)

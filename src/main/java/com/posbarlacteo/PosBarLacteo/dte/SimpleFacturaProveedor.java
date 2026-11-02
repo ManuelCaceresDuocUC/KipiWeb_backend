@@ -262,6 +262,9 @@ public class SimpleFacturaProveedor implements DteProveedor {
         // Las boletas usan RznSocEmisor / GiroEmisor; los demás documentos, RznSoc / GiroEmis (según su documentación)
         emisor.put(boleta ? "RznSocEmisor" : "RznSoc", e.razonSocial());
         emisor.put(boleta ? "GiroEmisor" : "GiroEmis", e.giro());
+        if (!boleta && e.tieneActeco()) {
+            emisor.put("Acteco", e.acteco());
+        }
         emisor.put("DirOrigen", e.direccion());
         emisor.put("CmnaOrigen", e.comuna());
         emisor.put("CiudadOrigen", e.comuna());

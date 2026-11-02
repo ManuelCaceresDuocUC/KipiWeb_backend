@@ -133,8 +133,13 @@ public class OpenFacturaProveedor implements DteProveedor {
             if (e == null || !e.completo()) {
                 throw new DteException("La nota de crédito necesita la razón social, el giro, la dirección y la comuna de tu empresa, y alguno falta en tu registro. Contáctanos para completarlos.");
             }
+            if (!e.tieneActeco()) {
+                throw new DteException("La nota de crédito necesita el código de actividad económica (Acteco) de tu empresa. Ingrésalo en Facturación Electrónica (6 dígitos, lo encuentras en tu Mi SII > Actividades económicas).");
+            }
+            // El esquema valida el ORDEN de los campos: RUT, razón social, giro, actividad, dirección, comuna
             emisor.put("RznSoc", corto(e.razonSocial(), 100));
             emisor.put("GiroEmis", corto(e.giro(), 80));
+            emisor.put("Acteco", e.acteco());
             emisor.put("DirOrigen", corto(e.direccion(), 70));
             emisor.put("CmnaOrigen", corto(e.comuna(), 20));
         }
@@ -154,6 +159,9 @@ public class OpenFacturaProveedor implements DteProveedor {
         long neto = Math.round(s.total() / 1.19);
         Map<String, Object> totales = new LinkedHashMap<>();
         totales.put("MntNeto", neto);
+        if (tipoDte == 61) {
+            totales.put("TasaIVA", 19);
+        }
         totales.put("IVA", s.total() - neto);
         totales.put("MntTotal", s.total());
         encabezado.put("Totales", totales);

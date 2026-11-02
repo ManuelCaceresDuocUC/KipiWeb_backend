@@ -19,6 +19,7 @@ import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.model.ConfiguracionDte;
 import com.posbarlacteo.PosBarLacteo.repository.ConfiguracionDteRepository;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.dte.DatosEmisor;
 import com.posbarlacteo.PosBarLacteo.service.AuditoriaService;
 import com.posbarlacteo.PosBarLacteo.service.DteService;
 import com.posbarlacteo.PosBarLacteo.util.CifradoClaves;
@@ -124,6 +125,11 @@ public class DteConfigController {
         }
         config.setRutEmisor(payload.getRutEmisor() == null ? null : payload.getRutEmisor().trim());
         config.setAmbiente(payload.getAmbiente());
+        String acteco = payload.getActeco() == null ? "" : payload.getActeco().trim();
+        if (!acteco.isEmpty() && DatosEmisor.parsearActeco(acteco).isEmpty()) {
+            throw new NegocioException("El código de actividad económica debe tener 6 dígitos (puedes poner hasta 4 separados por coma).");
+        }
+        config.setActeco(acteco.isEmpty() ? null : String.join(", ", DatosEmisor.parsearActeco(acteco).stream().map(String::valueOf).toList()));
         config.setEmitirBoletaEfectivo(payload.isEmitirBoletaEfectivo());
         config.setEmitirBoletaTarjeta(payload.isEmitirBoletaTarjeta());
         config.setEmitirBoletaTransferencia(payload.isEmitirBoletaTransferencia());

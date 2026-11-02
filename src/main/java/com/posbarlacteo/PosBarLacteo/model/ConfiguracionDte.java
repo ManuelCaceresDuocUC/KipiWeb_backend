@@ -36,6 +36,10 @@ public class ConfiguracionDte {
     @Column(name = "rut_emisor", length = 20)
     private String rutEmisor;
 
+    /** Códigos de actividad económica del SII, separados por coma (hasta 4). Los exigen las notas de crédito y facturas. */
+    @Column(name = "acteco", length = 60)
+    private String acteco;
+
     @Column(name = "ambiente", length = 20)
     private String ambiente = "produccion";
 
