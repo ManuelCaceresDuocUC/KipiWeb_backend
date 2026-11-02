@@ -106,6 +106,17 @@ public class SecurityConfig {
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+
+        // Retorno de Flow tras registrar la tarjeta: es una NAVEGACIÓN del navegador (Flow redirige con un POST
+        // desde flow.cl / sandbox.flow.cl), no una llamada de nuestro frontend. El navegador manda el encabezado
+        // Origin de Flow y, sin esta excepción, Spring responde "Invalid CORS request". El endpoint no expone datos
+        // (solo valida el token contra Flow y redirige al frontend), por eso aquí se acepta cualquier origen.
+        CorsConfiguration retornoFlow = new CorsConfiguration();
+        retornoFlow.setAllowedOriginPatterns(List.of("*"));
+        retornoFlow.setAllowedMethods(List.of("GET", "POST"));
+        retornoFlow.setAllowedHeaders(List.of("*"));
+        retornoFlow.setAllowCredentials(false);
+        source.registerCorsConfiguration("/api/auth/registro-exitoso", retornoFlow);
         return source;
     }
 
