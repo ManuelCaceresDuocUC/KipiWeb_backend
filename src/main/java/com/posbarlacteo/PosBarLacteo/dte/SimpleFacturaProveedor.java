@@ -34,8 +34,10 @@ import java.util.Base64;
  * Nota de crédito (SDK): POST /invoiceCreditDebitNotesV2/{sucursal}/{motivo} (mismo cuerpo, con Referencia).
  * PDF (SDK): POST /dte/pdf con {credenciales:{rutEmisor,nombreSucursal}, dteReferenciadoExterno:{folio,codigoTipoDte,ambiente}}.
  *
- * Por validar en la primera prueba: el SDK no trae ejemplo de BOLETA (tipo 39): se asume el mismo endpoint /invoiceV2,
- * con precios con IVA incluido (IdDoc.IndMntNeto = 2 según el SII). Tampoco se sabe si exige "Acteco" del emisor.
+ * Boleta (documentación oficial): mismo endpoint /invoiceV2/{sucursal}; montos brutos por defecto (IndMntNeto=2 los
+ * pasaría a netos, por eso NO se envía); emisor con RznSocEmisor / GiroEmisor.
+ * Por validar en la primera prueba: la nota de crédito (viene del SDK, no de la guía de boletas), el cálculo de totales
+ * de la boleta y si exige "Acteco" del emisor.
  */
 @Component
 public class SimpleFacturaProveedor implements DteProveedor {
@@ -223,6 +225,7 @@ public class SimpleFacturaProveedor implements DteProveedor {
             ref.put("folio", folio);
             ref.put("codigoTipoDte", tipoDte);
             ref.put("ambiente", c.sandbox() ? 0 : 1);
+            ref.put("tipoPapel", 1); // 80 mm (impresora térmica)
             Map<String, Object> pedido = new LinkedHashMap<>();
             pedido.put("credenciales", cred);
             pedido.put("dteReferenciadoExterno", ref);
@@ -247,7 +250,7 @@ public class SimpleFacturaProveedor implements DteProveedor {
         idDoc.put("TipoDTE", tipoDte);
         idDoc.put("FchEmis", s.fecha().toString());
         if (boleta) {
-            idDoc.put("IndMntNeto", 2); // en boletas los montos del detalle incluyen IVA
+            idDoc.put("IndServicioBoleta", 3); // ventas y servicios. Sin IndMntNeto: en boletas los montos ya vienen con IVA (así lo documenta SimpleFactura)
         } else {
             idDoc.put("FmaPago", 1);    // contado
         }
@@ -255,8 +258,9 @@ public class SimpleFacturaProveedor implements DteProveedor {
         DatosEmisor e = c.emisor();
         Map<String, Object> emisor = new LinkedHashMap<>();
         emisor.put("RUTEmisor", c.rutEmisor());
-        emisor.put("RznSoc", e.razonSocial());
-        emisor.put("GiroEmis", e.giro());
+        // Las boletas usan RznSocEmisor / GiroEmisor; los demás documentos, RznSoc / GiroEmis (según su documentación)
+        emisor.put(boleta ? "RznSocEmisor" : "RznSoc", e.razonSocial());
+        emisor.put(boleta ? "GiroEmisor" : "GiroEmis", e.giro());
         emisor.put("DirOrigen", e.direccion());
         emisor.put("CmnaOrigen", e.comuna());
         emisor.put("CiudadOrigen", e.comuna());
