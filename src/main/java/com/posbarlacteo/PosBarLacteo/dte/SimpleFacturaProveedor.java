@@ -49,6 +49,7 @@ public class SimpleFacturaProveedor implements DteProveedor {
     private static final int MOTIVO_NC_OTROS = 6; // ReasonType::Otros
     private static final String RUT_GENERICO = "66666666-6";
     private static final Pattern MENSAJE = Pattern.compile("\"message\"\\s*:\\s*\"([^\"]{1,300})");
+    private static final Pattern ERRORES = Pattern.compile("\"errors\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
     private static final ParameterizedTypeReference<Map<String, Object>> MAPA = new ParameterizedTypeReference<>() { };
 
     private record Token(String valor, Instant vence) {
@@ -338,8 +339,13 @@ public class SimpleFacturaProveedor implements DteProveedor {
     private DteException traducirEmision(HttpStatusCodeException h) {
         int st = h.getStatusCode().value();
         if (st >= 400 && st < 500 && st != 401 && st != 403 && st != 429) {
-            Matcher m = MENSAJE.matcher(h.getResponseBodyAsString());
-            String detalle = m.find() ? m.group(1) : ClienteHttpDte.recortar(h.getResponseBodyAsString());
+            String cuerpo = h.getResponseBodyAsString();
+            Matcher m = MENSAJE.matcher(cuerpo);
+            String detalle = m.find() ? m.group(1) : ClienteHttpDte.recortar(cuerpo);
+            Matcher e = ERRORES.matcher(cuerpo); // el motivo real suele venir en "errors", no en "message"
+            if (e.find() && !e.group(1).isBlank()) {
+                detalle += " — Detalle: " + ClienteHttpDte.recortar(e.group(1));
+            }
             return new DteException(PROVEEDOR + " rechazó el documento (HTTP " + st + "): " + detalle);
         }
         return ClienteHttpDte.traducir(h, PROVEEDOR, true);
