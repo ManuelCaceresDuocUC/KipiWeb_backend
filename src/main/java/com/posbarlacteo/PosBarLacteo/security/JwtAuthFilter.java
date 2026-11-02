@@ -20,6 +20,9 @@ import jakarta.servlet.http.HttpServletResponse;
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
 
+    /** Atributo de la petición con el segundo (epoch) en que se emitió el token. */
+    public static final String ATTR_EMITIDO = "kipipos.jwt.emitido";
+
     private final JwtService jwtService;
 
     public JwtAuthFilter(JwtService jwtService) {
@@ -36,8 +39,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             String token = authHeader.substring(7).trim();
 
             if (!token.isEmpty() && !"null".equalsIgnoreCase(token) && !"undefined".equalsIgnoreCase(token)) {
-                AuthPrincipal principal = jwtService.leerPrincipal(token);
+                JwtService.Lectura lectura = jwtService.leer(token);
+                AuthPrincipal principal = lectura == null ? null : lectura.principal();
                 if (principal != null) {
+                    request.setAttribute(ATTR_EMITIDO, lectura.emitidoSeg());
                     SimpleGrantedAuthority authority =
                             new SimpleGrantedAuthority("ROLE_" + principal.rol().toUpperCase(Locale.ROOT));
                     UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(

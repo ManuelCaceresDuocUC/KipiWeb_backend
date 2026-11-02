@@ -15,7 +15,7 @@ public class UsuarioActivoService {
 
     private static final long TTL_MS = 30_000;
 
-    private record Entrada(boolean activo, long venceMs) { }
+    private record Entrada(boolean activo, Long sesionDesdeMs, long venceMs) { }
 
     private final ConcurrentHashMap<Long, Entrada> cache = new ConcurrentHashMap<>();
     private final UsuarioRepository usuarios;
@@ -24,15 +24,27 @@ public class UsuarioActivoService {
         this.usuarios = usuarios;
     }
 
-    public boolean activo(Long usuarioId) {
+    private Entrada entrada(Long usuarioId) {
         long ahora = System.currentTimeMillis();
         Entrada e = cache.get(usuarioId);
         if (e != null && e.venceMs() > ahora) {
-            return e.activo();
+            return e;
         }
-        boolean activo = usuarios.findById(usuarioId).map(u -> u.estaActivo()).orElse(false);
-        cache.put(usuarioId, new Entrada(activo, ahora + TTL_MS));
-        return activo;
+        Entrada nueva = usuarios.findById(usuarioId)
+                .map(u -> new Entrada(u.estaActivo(), u.getSesionDesde(), ahora + TTL_MS))
+                .orElse(new Entrada(false, null, ahora + TTL_MS));
+        cache.put(usuarioId, nueva);
+        return nueva;
+    }
+
+    public boolean activo(Long usuarioId) {
+        return entrada(usuarioId).activo();
+    }
+
+    /** false si el token (emitido en emitidoSeg) es anterior a una revocación de sesiones del usuario. */
+    public boolean sesionVigente(Long usuarioId, long emitidoSeg) {
+        Long desde = entrada(usuarioId).sesionDesdeMs();
+        return desde == null || emitidoSeg >= desde / 1000L;
     }
 
     public void invalidar(Long usuarioId) {

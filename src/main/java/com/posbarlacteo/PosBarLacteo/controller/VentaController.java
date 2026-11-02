@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.AuditoriaService;
 import com.posbarlacteo.PosBarLacteo.service.DteService;
 import com.posbarlacteo.PosBarLacteo.service.VentaDocumentosService;
 import com.posbarlacteo.PosBarLacteo.service.VentaService;
@@ -27,8 +28,11 @@ public class VentaController {
     private final VentaService ventaService;
     private final VentaDocumentosService documentos;
     private final DteService dteService;
+    private final AuditoriaService auditoria;
 
-    public VentaController(VentaService ventaService, VentaDocumentosService documentos, DteService dteService) {
+    public VentaController(VentaService ventaService, VentaDocumentosService documentos, DteService dteService,
+                           AuditoriaService auditoria) {
+        this.auditoria = auditoria;
         this.ventaService = ventaService;
         this.documentos = documentos;
         this.dteService = dteService;
@@ -43,6 +47,7 @@ public class VentaController {
     public Map<String, Object> anular(@PathVariable Long id, @RequestBody Map<String, String> body) {
         AuthPrincipal p = SecurityUtils.actual();
         Map<String, Object> resultado = new LinkedHashMap<>(ventaService.anular(p, id, body == null ? null : body.get("motivo")));
+        auditoria.registrar(p, "VENTA_ANULADA", "Anuló la venta #" + id + (body != null && body.get("motivo") != null ? ". Motivo: " + body.get("motivo") : ""));
         resultado.put("notaCredito", notaCredito(p, id));
         return resultado;
     }

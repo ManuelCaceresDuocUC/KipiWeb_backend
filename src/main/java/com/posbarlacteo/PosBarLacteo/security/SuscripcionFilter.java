@@ -50,6 +50,13 @@ public class SuscripcionFilter extends OncePerRequestFilter {
                 res.getWriter().write("{\"message\":\"Tu usuario fue desactivado. Contacta a tu administrador.\"}");
                 return;
             }
+            Object emitido = req.getAttribute(JwtAuthFilter.ATTR_EMITIDO);
+            if (emitido instanceof Long seg && !usuarioActivo.sesionVigente(p.usuarioId(), seg)) {
+                res.setStatus(401);
+                res.setContentType("application/json;charset=UTF-8");
+                res.getWriter().write("{\"message\":\"Tu sesión se cerró porque cambiaron tu contraseña o tus permisos. Inicia sesión de nuevo.\"}");
+                return;
+            }
         } catch (RuntimeException e) {
             // ante un fallo interno no se bloquea
         }

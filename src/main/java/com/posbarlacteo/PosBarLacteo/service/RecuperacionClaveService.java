@@ -96,6 +96,7 @@ public class RecuperacionClaveService {
         }
         Usuario u = usuarios.findById(t.getUsuarioId()).orElseThrow(() -> new NegocioException("El enlace no es válido."));
         u.setContrasena(encoder.encode(nueva));
+        u.revocarSesiones(); // quien tuviera una sesión abierta con la clave anterior queda fuera
         usuarios.save(u);
         t.setUsado(true);
         tokens.save(t);

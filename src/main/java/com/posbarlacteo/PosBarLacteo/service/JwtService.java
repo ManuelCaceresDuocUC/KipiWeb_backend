@@ -59,6 +59,14 @@ public class JwtService {
      * (incluye tokens antiguos sin empresa: obligan a iniciar sesión de nuevo).
      */
     public AuthPrincipal leerPrincipal(String token) {
+        Lectura l = leer(token);
+        return l == null ? null : l.principal();
+    }
+
+    /** Identidad del token y segundo (epoch) en que se emitió. */
+    public record Lectura(AuthPrincipal principal, long emitidoSeg) { }
+
+    public Lectura leer(String token) {
         try {
             Claims c = Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
             Number uid = c.get("uid", Number.class);
@@ -68,12 +76,13 @@ public class JwtService {
             if (uid == null || eid == null || rol == null) {
                 return null;
             }
-            return new AuthPrincipal(
+            long iat = c.getIssuedAt() != null ? c.getIssuedAt().getTime() / 1000L : 0L;
+            return new Lectura(new AuthPrincipal(
                     uid.longValue(),
                     c.getSubject(),
                     eid.longValue(),
                     sid != null ? sid.longValue() : null,
-                    rol);
+                    rol), iat);
         } catch (Exception e) {
             return null;
         }

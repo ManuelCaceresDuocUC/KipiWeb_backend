@@ -19,6 +19,7 @@ import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.model.ConfiguracionDte;
 import com.posbarlacteo.PosBarLacteo.repository.ConfiguracionDteRepository;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.AuditoriaService;
 import com.posbarlacteo.PosBarLacteo.service.DteService;
 import com.posbarlacteo.PosBarLacteo.util.CifradoClaves;
 
@@ -35,8 +36,11 @@ public class DteConfigController {
     private final ConfiguracionDteRepository repository;
     private final DteProveedorRegistry registry;
     private final DteService dteService;
+    private final AuditoriaService auditoria;
 
-    public DteConfigController(ConfiguracionDteRepository repository, DteProveedorRegistry registry, DteService dteService) {
+    public DteConfigController(ConfiguracionDteRepository repository, DteProveedorRegistry registry, DteService dteService,
+                               AuditoriaService auditoria) {
+        this.auditoria = auditoria;
         this.repository = repository;
         this.registry = registry;
         this.dteService = dteService;
@@ -125,6 +129,9 @@ public class DteConfigController {
         config.setEmitirBoletaTransferencia(payload.isEmitirBoletaTransferencia());
 
         repository.save(config);
+        // Nunca se registra la llave: solo qué cambió
+        auditoria.registrar(SecurityUtils.actual(), "DTE_CONFIG", "Proveedor " + proveedor + ", ambiente " + config.getAmbiente()
+                + (llaveNueva ? ", credenciales nuevas" : ""));
         return ResponseEntity.ok(Map.of("status", "success", "message", "Configuración DTE guardada."));
     }
 

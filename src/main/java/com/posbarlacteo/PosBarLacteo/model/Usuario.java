@@ -49,6 +49,20 @@ public class Usuario {
     @Column(name = "activo")
     private Boolean activo = true;
 
+    /** Epoch (ms) desde el cual vale una sesión: los tokens emitidos antes quedan revocados. null = ninguna revocación. */
+    @JsonIgnore
+    @Column(name = "sesion_desde")
+    private Long sesionDesde;
+
+    public Long getSesionDesde() {
+        return sesionDesde;
+    }
+
+    /** Cierra todas las sesiones abiertas del usuario (cambio de contraseña o de permisos). */
+    public void revocarSesiones() {
+        this.sesionDesde = System.currentTimeMillis();
+    }
+
     public boolean estaActivo() {
         return !Boolean.FALSE.equals(activo);
     }

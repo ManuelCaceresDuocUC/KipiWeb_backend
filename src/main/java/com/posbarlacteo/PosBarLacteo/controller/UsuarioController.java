@@ -32,6 +32,7 @@ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.LoginAttemptService;
 import com.posbarlacteo.PosBarLacteo.security.Roles;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.AuditoriaService;
 import com.posbarlacteo.PosBarLacteo.service.JwtService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -48,10 +49,13 @@ public class UsuarioController {
     private final LoginAttemptService loginAttempts;
     private final SucursalRepository sucursalRepository;
     private final UsuarioActivoService usuarioActivo;
+    private final AuditoriaService auditoria;
 
     public UsuarioController(UsuarioRepository usuarioRepository, JwtService jwtService,
                              PasswordEncoder passwordEncoder, LoginAttemptService loginAttempts,
-                             SucursalRepository sucursalRepository, UsuarioActivoService usuarioActivo) {
+                             SucursalRepository sucursalRepository, UsuarioActivoService usuarioActivo,
+                             AuditoriaService auditoria) {
+        this.auditoria = auditoria;
         this.sucursalRepository = sucursalRepository;
         this.usuarioActivo = usuarioActivo;
         this.usuarioRepository = usuarioRepository;
@@ -122,6 +126,7 @@ public class UsuarioController {
         u.setSucursal(sucursal);
         u.setActivo(true);
         usuarioRepository.save(u);
+        auditoria.registrar(yo, "USUARIO_CREADO", "Creó el usuario \"" + nombre + "\" (" + u.getRol() + ", sucursal " + sucursal.getNombre() + ")");
         return Map.of("id", u.getId(), "message", "Usuario creado.");
     }
 
@@ -142,8 +147,12 @@ public class UsuarioController {
             u.setSucursal(sucursalDeMiEmpresa(req.sucursalId(), u.getEmpresa().getId()));
         }
         u.setRol(nuevoRol);
+        u.revocarSesiones(); // su token actual lleva el rol/sucursal anteriores: debe iniciar sesión de nuevo
         usuarioRepository.save(u);
-        return Map.of("message", "Usuario actualizado. Los cambios de rol aplican en su próximo inicio de sesión.");
+        usuarioActivo.invalidar(u.getId());
+        auditoria.registrar(yo, "USUARIO_EDITADO", "Cambió rol/sucursal de \"" + u.getUsuario() + "\": " + nuevoRol
+                + (u.getSucursal() != null ? ", sucursal " + u.getSucursal().getNombre() : ""));
+        return Map.of("message", "Usuario actualizado. Su sesión actual se cerrará y entrará con los permisos nuevos.");
     }
 
     /** Activa o desactiva un usuario (no se borra: conserva su historial de ventas y cajas). */
@@ -166,6 +175,8 @@ public class UsuarioController {
         u.setActivo(req.activo());
         usuarioRepository.save(u);
         usuarioActivo.invalidar(u.getId());
+        auditoria.registrar(yo, req.activo() ? "USUARIO_ACTIVADO" : "USUARIO_DESACTIVADO",
+                (req.activo() ? "Activó" : "Desactivó") + " al usuario \"" + u.getUsuario() + "\"");
         return Map.of("message", req.activo() ? "Usuario activado." : "Usuario desactivado. Perderá el acceso en unos segundos.");
     }
 
@@ -201,8 +212,11 @@ public class UsuarioController {
             throw new NegocioException("La contraseña debe tener entre 8 y 100 caracteres.");
         }
         u.setContrasena(passwordEncoder.encode(nueva));
+        u.revocarSesiones(); // cierra las sesiones abiertas con la contraseña anterior
         usuarioRepository.save(u);
-        return Map.of("message", "Contraseña de \"" + u.getUsuario() + "\" actualizada.");
+        usuarioActivo.invalidar(u.getId());
+        auditoria.registrar(SecurityUtils.actual(), "USUARIO_CLAVE", "Restableció la contraseña de \"" + u.getUsuario() + "\"");
+        return Map.of("message", "Contraseña de \"" + u.getUsuario() + "\" actualizada. Sus sesiones abiertas se cerraron.");
     }
 
     /** El administrador registra o corrige el correo de un usuario de su empresa (permite que recupere su clave solo). */
@@ -212,6 +226,7 @@ public class UsuarioController {
         Usuario u = usuarioDeMiEmpresa(id);
         u.setCorreo(MailService.validarDestino(req.correo()));
         usuarioRepository.save(u);
+        auditoria.registrar(SecurityUtils.actual(), "USUARIO_CORREO", "Cambió el correo de \"" + u.getUsuario() + "\"");
         return Map.of("message", "Correo actualizado.");
     }
 

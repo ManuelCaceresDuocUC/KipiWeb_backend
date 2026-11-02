@@ -31,6 +31,18 @@ public class PublicoController {
     private final RecuperacionClaveService recuperacion;
     private final TurnstileService turnstile;
     private final LimiteSolicitudes limite;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    /** Chequeo de salud para el monitor de disponibilidad: 200 si el servidor y la base responden, 503 si no. */
+    @org.springframework.web.bind.annotation.GetMapping("/salud")
+    public ResponseEntity<Map<String, String>> salud() {
+        try {
+            jdbc.queryForObject("SELECT 1", Integer.class);
+            return ResponseEntity.ok(Map.of("estado", "ok"));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(503).body(Map.of("estado", "base de datos no disponible"));
+        }
+    }
 
     @Data
     public static class ContactoReq {
