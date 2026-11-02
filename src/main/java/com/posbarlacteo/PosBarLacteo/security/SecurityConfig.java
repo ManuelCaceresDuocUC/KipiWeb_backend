@@ -17,7 +17,6 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.posbarlacteo.PosBarLacteo.service.SuscripcionService;
 import com.posbarlacteo.PosBarLacteo.service.UsuarioActivoService;
@@ -104,9 +103,6 @@ public class SecurityConfig {
         config.setAllowCredentials(false); // el token viaja en la cabecera Authorization, no en cookies
         config.setMaxAge(3600L);
 
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
-
         // Retorno de Flow tras registrar la tarjeta: es una NAVEGACIÓN del navegador (Flow redirige con un POST
         // desde flow.cl / sandbox.flow.cl), no una llamada de nuestro frontend. El navegador manda el encabezado
         // Origin de Flow y, sin esta excepción, Spring responde "Invalid CORS request". El endpoint no expone datos
@@ -116,8 +112,9 @@ public class SecurityConfig {
         retornoFlow.setAllowedMethods(List.of("GET", "POST"));
         retornoFlow.setAllowedHeaders(List.of("*"));
         retornoFlow.setAllowCredentials(false);
-        source.registerCorsConfiguration("/api/auth/registro-exitoso", retornoFlow);
-        return source;
+
+        // Se elige por ruta exacta a propósito (y no con registerCorsConfiguration): así no depende del orden de registro
+        return request -> "/api/auth/registro-exitoso".equals(request.getRequestURI()) ? retornoFlow : config;
     }
 
     /** Agrega el origen sin barra final y, para dominios https, la variante con/sin "www.". */
