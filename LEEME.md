@@ -1,2 +1,2 @@
-# Arreglo: retorno de Flow (v2)
-SecurityConfig.java: la excepcion de CORS para /api/auth/registro-exitoso ahora se elige por ruta exacta (la v1 no tenia efecto porque la regla general "/**" se evaluaba primero). Reemplaza a la v1. No compilado con Maven.
+# Arreglo: nota de credito en OpenFactura
+OpenFacturaProveedor.java: la nota de credito ahora envia RznSoc, GiroEmis, DirOrigen y CmnaOrigen del emisor (OpenFactura respondia "Validacion de Esquema" por falta de RznSoc). Requiere las clases de la Etapa 9 (CredencialesDte/DatosEmisor). No compilado con Maven.

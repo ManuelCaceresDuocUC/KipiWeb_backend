@@ -126,6 +126,18 @@ public class OpenFacturaProveedor implements DteProveedor {
 
         Map<String, Object> emisor = new LinkedHashMap<>();
         emisor.put("RUTEmisor", c.rutEmisor());
+        if (tipoDte == 61) {
+            // La nota de crédito (a diferencia de la boleta) exige los datos del emisor: el esquema del SII valida
+            // RznSoc, GiroEmis, DirOrigen y CmnaOrigen. Se toman del registro de la empresa en KIPIPOS.
+            DatosEmisor e = c.emisor();
+            if (e == null || !e.completo()) {
+                throw new DteException("La nota de crédito necesita la razón social, el giro, la dirección y la comuna de tu empresa, y alguno falta en tu registro. Contáctanos para completarlos.");
+            }
+            emisor.put("RznSoc", corto(e.razonSocial(), 100));
+            emisor.put("GiroEmis", corto(e.giro(), 80));
+            emisor.put("DirOrigen", corto(e.direccion(), 70));
+            emisor.put("CmnaOrigen", corto(e.comuna(), 20));
+        }
         encabezado.put("Emisor", emisor);
 
         Map<String, Object> receptor = new LinkedHashMap<>();
@@ -207,6 +219,11 @@ public class OpenFacturaProveedor implements DteProveedor {
             }
         }
         return null;
+    }
+
+    private static String corto(String v, int max) {
+        String t = v.replaceAll("\\s+", " ").trim();
+        return t.length() > max ? t.substring(0, max) : t;
     }
 
     private static Long aLong(Object o) {
