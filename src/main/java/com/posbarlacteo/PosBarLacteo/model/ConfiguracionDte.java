@@ -58,6 +58,11 @@ public class ConfiguracionDte {
         return apiKey != null && !apiKey.isBlank();
     }
 
+    @JsonProperty(value = "apiSecretConfigurada", access = JsonProperty.Access.READ_ONLY)
+    public boolean isApiSecretConfigurada() {
+        return apiSecret != null && !apiSecret.isBlank();
+    }
+
     @JsonProperty(value = "apiKeyEnmascarada", access = JsonProperty.Access.READ_ONLY)
     public String getApiKeyEnmascarada() {
         if (apiKey == null || apiKey.isBlank()) {

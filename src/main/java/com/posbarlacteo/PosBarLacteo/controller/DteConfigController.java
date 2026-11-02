@@ -99,6 +99,16 @@ public class DteConfigController {
                     + " Si cambió la clave de cifrado, ingresa la API Key nuevamente.");
         }
 
+        // Las credenciales de un proveedor no sirven en otro: al cambiar de proveedor se exigen nuevas
+        boolean cambioProveedor = config.getId() != null && !"ninguno".equals(proveedor)
+                && !proveedor.equalsIgnoreCase(config.getProveedor());
+        if (cambioProveedor && !llaveNueva) {
+            throw new NegocioException("Cambiaste de proveedor: ingresa sus credenciales (las del proveedor anterior no sirven).");
+        }
+        if (cambioProveedor && !secretNuevo) {
+            config.setApiSecret(null); // no arrastrar la contraseña del proveedor anterior
+        }
+
         config.setEmpresaId(empresaId);
         config.setProveedor(proveedor);
         // Llave en blanco = conservar la que ya estaba guardada

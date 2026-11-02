@@ -17,6 +17,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import com.posbarlacteo.PosBarLacteo.dte.CredencialesDte;
+import com.posbarlacteo.PosBarLacteo.dte.DatosEmisor;
 import com.posbarlacteo.PosBarLacteo.dte.DteException;
 import com.posbarlacteo.PosBarLacteo.dte.DteProveedor;
 import com.posbarlacteo.PosBarLacteo.dte.DteProveedorRegistry;
@@ -34,6 +35,7 @@ import com.posbarlacteo.PosBarLacteo.model.Venta;
 import com.posbarlacteo.PosBarLacteo.model.VentaDetalle;
 import com.posbarlacteo.PosBarLacteo.repository.ConfiguracionDteRepository;
 import com.posbarlacteo.PosBarLacteo.repository.DocumentoTributarioRepository;
+import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.VentaRepository;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 
@@ -60,16 +62,26 @@ public class DteService {
     private final VoucherService voucherService;
     private final ComprobanteService comprobanteService;
     private final DteProveedorRegistry registry;
+    private final EmpresaRepository empresaRepository;
 
     public DteService(ConfiguracionDteRepository configDteRepository, DocumentoTributarioRepository documentoRepository,
                       VentaRepository ventaRepository, VoucherService voucherService,
-                      ComprobanteService comprobanteService, DteProveedorRegistry registry) {
+                      ComprobanteService comprobanteService, DteProveedorRegistry registry,
+                      EmpresaRepository empresaRepository) {
         this.configDteRepository = configDteRepository;
         this.documentoRepository = documentoRepository;
         this.ventaRepository = ventaRepository;
         this.voucherService = voucherService;
         this.comprobanteService = comprobanteService;
         this.registry = registry;
+        this.empresaRepository = empresaRepository;
+    }
+
+    /** Datos tributarios de la empresa tal como quedaron en su registro (null si no se encuentra). */
+    private DatosEmisor datosEmisor(Long empresaId) {
+        return empresaRepository.findById(empresaId)
+                .map(e -> new DatosEmisor(e.getRazonSocial(), e.getGiro(), e.getDireccion(), e.getComuna()))
+                .orElse(null);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -258,7 +270,7 @@ public class DteService {
         if (key == null || key.isBlank()) {
             return ResultadoPrueba.rechazada("La API Key no puede estar vacía.");
         }
-        return proveedor.probarConexion(new CredencialesDte(key.trim(), secret, rut, ambiente));
+        return proveedor.probarConexion(new CredencialesDte(key.trim(), secret, rut, ambiente, datosEmisor(empresaId)));
     }
 
     // ------------------------------------------------------------------------------------------
@@ -322,7 +334,7 @@ public class DteService {
             if (config.getRutEmisor() == null || config.getRutEmisor().isBlank()) {
                 throw new DteException("Falta el RUT emisor en la configuración de facturación.");
             }
-            CredencialesDte cred = new CredencialesDte(config.getApiKey(), config.getApiSecret(), config.getRutEmisor(), config.getAmbiente());
+            CredencialesDte cred = new CredencialesDte(config.getApiKey(), config.getApiSecret(), config.getRutEmisor(), config.getAmbiente(), datosEmisor(empresaId));
 
             ResultadoDte r = tipo == DocumentoTributario.BOLETA
                     ? proveedor.emitirBoleta(solicitud, cred)
