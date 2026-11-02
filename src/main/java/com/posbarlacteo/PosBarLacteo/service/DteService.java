@@ -169,13 +169,22 @@ public class DteService {
 
     /** Copia del PDF de la boleta emitida (si el almacenamiento de documentos está configurado). */
     public String pdfBoleta(AuthPrincipal p, Long ventaId) {
+        return pdfDocumento(p, ventaId, DocumentoTributario.BOLETA, "boleta");
+    }
+
+    /** Copia del PDF de la nota de crédito emitida al anular la venta. */
+    public String pdfNotaCredito(AuthPrincipal p, Long ventaId) {
+        return pdfDocumento(p, ventaId, DocumentoTributario.NOTA_CREDITO, "nota de crédito");
+    }
+
+    private String pdfDocumento(AuthPrincipal p, Long ventaId, int tipo, String nombre) {
         ventaRepository.findByIdAndEmpresaId(ventaId, p.empresaId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Venta no encontrada."));
         DocumentoTributario doc = documentoRepository
-                .findByEmpresaIdAndVentaIdAndTipoDte(p.empresaId(), ventaId, DocumentoTributario.BOLETA)
-                .orElseThrow(() -> new NegocioException("Esta venta no tiene boleta electrónica."));
+                .findByEmpresaIdAndVentaIdAndTipoDte(p.empresaId(), ventaId, tipo)
+                .orElseThrow(() -> new NegocioException("Esta venta no tiene " + (tipo == DocumentoTributario.BOLETA ? "boleta electrónica." : "nota de crédito.")));
         if (doc.getPdfKey() == null || doc.getPdfKey().isBlank()) {
-            throw new NegocioException("No hay una copia guardada del PDF de esta boleta. Búscala en el portal de tu proveedor (folio "
+            throw new NegocioException("No hay una copia guardada del PDF de esta " + nombre + ". Búscala en el portal de tu proveedor (folio "
                     + (doc.getFolio() != null ? doc.getFolio() : "sin registrar") + ").");
         }
         return Base64.getEncoder().encodeToString(comprobanteService.leer(doc.getPdfKey()));

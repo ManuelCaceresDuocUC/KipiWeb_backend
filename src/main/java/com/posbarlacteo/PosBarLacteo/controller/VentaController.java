@@ -61,7 +61,13 @@ public class VentaController {
             e = new DteService.Emision("PENDIENTE", null,
                     "La venta se anuló, pero no se pudo emitir la nota de crédito: " + ex.getMessage(), null);
         }
-        return emision(e, false);
+        return emision(e, true); // con PDF: así el POS imprime la nota de crédito al instante
+    }
+
+    /** Copia guardada del PDF 80 mm de la nota de crédito (solo ADMIN): {"pdf": "<base64>"}. */
+    @GetMapping("/{id}/nota-credito")
+    public Map<String, Object> notaCreditoPdf(@PathVariable Long id) {
+        return Map.of("ventaId", id, "pdf", dteService.pdfNotaCredito(SecurityUtils.actual(), id));
     }
 
     /** Reintenta la boleta pendiente de una venta. forzar=true (solo admin) para una marcada "REVISAR". */
