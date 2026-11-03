@@ -275,6 +275,11 @@ public class UsuarioController {
                     .body(Map.of("message", "Tu empresa aún no completa el pago de la suscripción."));
         }
 
+        if ("BAJA".equals(empresa.getEstado())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Esta cuenta fue dada de baja. Si fue un error, escríbenos a kipisofts@gmail.com."));
+        }
+
         if (!encontrado.estaActivo()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("message", "Tu usuario está desactivado. Contacta a tu administrador."));

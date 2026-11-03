@@ -15,7 +15,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.exception.RecursoNoEncontradoException;
+import com.posbarlacteo.PosBarLacteo.exception.ServicioExternoException;
 import com.posbarlacteo.PosBarLacteo.model.Empresa;
 import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
 
@@ -29,14 +31,20 @@ import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
  *  - Factura vencida (morose=1): EN_MORA con N días de gracia (uso normal + aviso); pasada la gracia, SUSPENDIDA.
  *  - Suspendida: solo lectura (puede consultar y pagar, no puede vender ni modificar).
  *  - Cancelada en Flow: acceso hasta el fin del período ya pagado.
+ *  - Prueba gratuita sin tarjeta (PRUEBA): uso normal hasta prueba_hasta. Vencida, la cuenta queda en solo lectura
+ *    (PRUEBA_VENCIDA, que no se guarda: se calcula por fecha) hasta que el cliente inscriba su tarjeta desde el portal.
+ *    La tarjeta se inscribe en Flow y recién ahí se crea la suscripción (el plan de Flow NO debe tener días de prueba).
+ *  - Baja (BAJA): el cliente cerró su cuenta; sin acceso. Los datos se borran pasado el plazo (ver BajaCuentaService).
  */
 @Service
 public class SuscripcionService {
 
     private static final Logger log = LoggerFactory.getLogger(SuscripcionService.class);
 
-    /** Plan único de Flow. */
-    public static final String PLAN_ID = "KIPI";
+    public static final String PRUEBA = "PRUEBA";
+    /** Estado calculado (no se guarda): prueba terminada y sin tarjeta inscrita. */
+    public static final String PRUEBA_VENCIDA = "PRUEBA_VENCIDA";
+    public static final String BAJA = "BAJA";
 
     public static final String PENDIENTE = "PENDIENTE";
     public static final String ACTIVA = "ACTIVA";
@@ -54,7 +62,11 @@ public class SuscripcionService {
 
     /** Vista de una empresa para el frontend y el filtro. */
     public record Vista(String estado, Modo modo, LocalDateTime moraDesde, LocalDateTime limiteGracia,
-                        LocalDateTime accesoHasta, boolean cancelada, String mensaje) {
+                        LocalDateTime accesoHasta, boolean cancelada, String mensaje, LocalDateTime pruebaHasta) {
+        public Vista(String estado, Modo modo, LocalDateTime moraDesde, LocalDateTime limiteGracia,
+                     LocalDateTime accesoHasta, boolean cancelada, String mensaje) {
+            this(estado, modo, moraDesde, limiteGracia, accesoHasta, cancelada, mensaje, null);
+        }
     }
 
     private record Entrada(Vista vista, long venceMs) { }
@@ -65,12 +77,28 @@ public class SuscripcionService {
     private final EmpresaRepository empresaRepository;
     private final FlowClient flow;
     private final long graciaDias;
+    private final long pruebaDias;
+    private final String planId;
 
     public SuscripcionService(EmpresaRepository empresaRepository, FlowClient flow,
-                              @Value("${suscripcion.gracia-dias:7}") long graciaDias) {
+                              @Value("${suscripcion.gracia-dias:7}") long graciaDias,
+                              @Value("${suscripcion.prueba-dias:30}") long pruebaDias,
+                              @Value("${flow.plan-id:KIPI}") String planId) {
         this.empresaRepository = empresaRepository;
         this.flow = flow;
         this.graciaDias = graciaDias;
+        this.pruebaDias = pruebaDias;
+        this.planId = planId;
+    }
+
+    /** Plan de Flow al que se suscribe (variable FLOW_PLAN_ID; debe ser un plan SIN días de prueba). */
+    public String planId() {
+        return planId;
+    }
+
+    /** Fin de la prueba gratuita para una empresa que se registra ahora. */
+    public LocalDateTime finDePruebaDesdeAhora() {
+        return LocalDateTime.now().plusDays(pruebaDias);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -103,6 +131,24 @@ public class SuscripcionService {
         if (PENDIENTE.equals(estado)) {
             return new Vista(PENDIENTE, Modo.DENEGADO, null, null, null, false, "Falta completar el pago de la suscripción.");
         }
+        if (BAJA.equals(estado)) {
+            return new Vista(BAJA, Modo.DENEGADO, null, null, null, false,
+                    "Tu cuenta fue dada de baja. Si fue un error, escríbenos antes de que se eliminen tus datos.");
+        }
+        if (PRUEBA.equals(estado)) {
+            LocalDateTime hasta = e.getPruebaHasta();
+            if (hasta == null || ahora.isAfter(hasta)) {
+                return new Vista(PRUEBA_VENCIDA, Modo.SOLO_LECTURA, null, null, null, false,
+                        "Tu prueba gratuita terminó. Puedes consultar tu información, pero para seguir vendiendo debes activar tu suscripción inscribiendo tu tarjeta. "
+                                + "Si prefieres no continuar, puedes dar de baja tu cuenta desde Administración.", hasta);
+            }
+            long dias = diasRestantes(ahora, hasta);
+            // Con más de 10 días no se muestra aviso (no estorbar); el portal siempre permite activar.
+            String msg = dias > 10 ? null
+                    : "Te " + (dias == 1 ? "queda 1 día" : "quedan " + dias + " días") + " de prueba gratuita (hasta el " + fecha(hasta)
+                    + "). Activa tu suscripción para no perder el acceso.";
+            return new Vista(PRUEBA, Modo.PLENO, null, null, null, false, msg, hasta);
+        }
         if (SUSPENDIDA.equals(estado)) {
             return new Vista(SUSPENDIDA, Modo.SOLO_LECTURA, e.getMoraDesde(), limiteGracia, e.getAccesoHasta(), cancelada,
                     "Tu cuenta está suspendida por falta de pago: puedes consultar tu información, pero no registrar ventas ni cambios. Regulariza el pago para reactivarla.");
@@ -127,6 +173,12 @@ public class SuscripcionService {
         }
         // ACTIVA, o empresas antiguas sin estado (nunca pasaron por Flow): uso normal
         return new Vista(estado == null ? ACTIVA : estado, Modo.PLENO, null, null, null, false, null);
+    }
+
+    /** Días enteros que faltan (redondeando hacia arriba): a las 23 h de plazo aún "queda 1 día". Nunca negativo. */
+    public static long diasRestantes(LocalDateTime desde, LocalDateTime hasta) {
+        long horas = java.time.Duration.between(desde, hasta).toHours();
+        return horas <= 0 ? 0 : (horas + 23) / 24;
     }
 
     private static String fecha(LocalDateTime d) {
@@ -194,6 +246,15 @@ public class SuscripcionService {
     public Vista sincronizar(Long empresaId) {
         Empresa e = empresaRepository.findById(empresaId).orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada."));
         if (e.getFlowSubscriptionId() == null || e.getFlowSubscriptionId().isBlank()) {
+            // Prueba/registro con la tarjeta ya inscrita pero sin suscripción guardada: se completa ahora.
+            if (e.getFlowCustomerId() != null && !e.getFlowCustomerId().isBlank()
+                    && (PRUEBA.equals(e.getEstado()) || PENDIENTE.equals(e.getEstado()))) {
+                try {
+                    rescatarEmpresa(e);
+                } catch (RuntimeException ex) {
+                    log.warn("No se pudo completar la suscripción de la empresa {}: {}", empresaId, ex.getMessage());
+                }
+            }
             return calcular(e); // sin suscripción en Flow (cuenta manual): nada que conciliar
         }
         consultar(e);
@@ -241,31 +302,88 @@ public class SuscripcionService {
      */
     public List<Empresa> rescatarRegistrosIncompletos(LocalDateTime antesDe) {
         List<Empresa> rescatadas = new ArrayList<>();
-        for (Empresa e : empresaRepository.findByEstadoAndFlowCustomerIdIsNotNullAndFlowSubscriptionIdIsNull(PENDIENTE)) {
-            if (e.getFechaRegistro() == null || e.getFechaRegistro().isAfter(antesDe)) {
-                continue; // muy reciente: puede estar pagando en este momento
-            }
-            try {
-                String subscriptionId = suscripcionVigenteEnFlow(e.getFlowCustomerId());
-                String origen = "tenía suscripción vigente en Flow sin registrar";
-                if (subscriptionId == null && tarjetaInscrita(e.getFlowCustomerId())) {
-                    subscriptionId = crearSuscripcion(e.getFlowCustomerId());
-                    origen = "tenía la tarjeta inscrita pero sin suscripción: se creó";
+        // PENDIENTE: registros antiguos que pagaban en el registro. PRUEBA: clientes que inscribieron su tarjeta desde el portal.
+        for (String estado : List.of(PENDIENTE, PRUEBA)) {
+            for (Empresa e : empresaRepository.findByEstadoAndFlowCustomerIdIsNotNullAndFlowSubscriptionIdIsNull(estado)) {
+                LocalDateTime iniciado = PRUEBA.equals(estado) ? e.getFlowInscripcionEn() : e.getFechaRegistro();
+                if (iniciado == null || iniciado.isAfter(antesDe)) {
+                    continue; // muy reciente (puede estar pagando en este momento) o nunca inició la inscripción
                 }
-                if (subscriptionId != null) {
-                    e.setFlowSubscriptionId(subscriptionId);
-                    e.setEstado(ACTIVA);
-                    e.setActivo(true);
-                    empresaRepository.save(e);
-                    invalidar(e.getId());
-                    rescatadas.add(e);
-                    log.warn("Empresa {} rescatada: {}.", e.getId(), origen);
+                try {
+                    if (rescatarEmpresa(e)) {
+                        rescatadas.add(e);
+                    }
+                } catch (RuntimeException ex) {
+                    log.warn("No se pudo revisar el registro incompleto de la empresa {}: {}", e.getId(), ex.getMessage());
                 }
-            } catch (RuntimeException ex) {
-                log.warn("No se pudo revisar el registro incompleto de la empresa {}: {}", e.getId(), ex.getMessage());
             }
         }
         return rescatadas;
+    }
+
+    /** Adopta la suscripción vigente de Flow o la crea si hay tarjeta inscrita; activa la empresa. true si quedó activa. */
+    private boolean rescatarEmpresa(Empresa e) {
+        String subscriptionId = suscripcionVigenteEnFlow(e.getFlowCustomerId());
+        String origen = "tenía suscripción vigente en Flow sin registrar";
+        if (subscriptionId == null && tarjetaInscrita(e.getFlowCustomerId())) {
+            subscriptionId = crearSuscripcion(e.getFlowCustomerId());
+            origen = "tenía la tarjeta inscrita pero sin suscripción: se creó";
+        }
+        if (subscriptionId == null) {
+            return false;
+        }
+        e.setFlowSubscriptionId(subscriptionId);
+        e.setEstado(ACTIVA);
+        e.setActivo(true);
+        empresaRepository.save(e);
+        invalidar(e.getId());
+        log.warn("Empresa {} rescatada: {}.", e.getId(), origen);
+        return true;
+    }
+
+    /**
+     * Inicia la inscripción de la tarjeta desde el portal (cliente en PRUEBA o con la prueba vencida). Crea el cliente
+     * en Flow si aún no existe y devuelve la URL de Flow donde se inscribe la tarjeta. Al volver, el endpoint
+     * /api/auth/registro-exitoso crea la suscripción y deja la cuenta ACTIVA.
+     */
+    public String iniciarInscripcionTarjeta(Long empresaId, String correo, String urlRetorno) {
+        Empresa e = empresaRepository.findById(empresaId).orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada."));
+        if (!PRUEBA.equals(e.getEstado())) {
+            throw new NegocioException("Tu cuenta no está en período de prueba, por lo que no hay nada que activar.");
+        }
+        if (e.getFlowSubscriptionId() != null && !e.getFlowSubscriptionId().isBlank()) {
+            throw new NegocioException("Tu suscripción ya está creada. Si no ves el cambio, pulsa \"Ya pagué\".");
+        }
+        String customerId = e.getFlowCustomerId();
+        if (customerId == null || customerId.isBlank()) {
+            Map<String, Object> creado = flow.post("/customer/create",
+                    mapa("name", e.getRazonSocial(), "email", MailService.validarDestino(correo), "externalId", e.getRutEmpresa()));
+            if (creado == null || creado.get("customerId") == null) {
+                throw new ServicioExternoException("No se pudo crear tu cuenta de pagos. Inténtalo más tarde.");
+            }
+            customerId = String.valueOf(creado.get("customerId"));
+            e.setFlowCustomerId(customerId);
+            empresaRepository.save(e);
+        }
+        Map<String, Object> reg = flow.post("/customer/register", mapa("customerId", customerId, "url_return", urlRetorno));
+        if (reg == null || reg.get("url") == null || reg.get("token") == null) {
+            throw new ServicioExternoException("No se pudo generar el enlace de pago. Inténtalo más tarde.");
+        }
+        e.setFlowInscripcionEn(LocalDateTime.now());
+        empresaRepository.save(e);
+        invalidar(empresaId);
+        return reg.get("url") + "?token=" + reg.get("token");
+    }
+
+    /** Cancela de inmediato la suscripción de Flow (al dar de baja la cuenta). Lanza excepción si Flow no lo confirma. */
+    public void cancelarSuscripcionFlow(Empresa e) {
+        if (e.getFlowSubscriptionId() == null || e.getFlowSubscriptionId().isBlank()) {
+            return;
+        }
+        Map<String, Object> r = flow.post("/subscription/cancel", mapa("subscriptionId", e.getFlowSubscriptionId(), "at_period_end", "0"));
+        if (r == null) {
+            throw new ServicioExternoException("Flow no confirmó la cancelación de tu suscripción.");
+        }
     }
 
     /** Id de una suscripción activa (1) o en prueba (2) del cliente en Flow, o null. */
@@ -294,7 +412,7 @@ public class SuscripcionService {
 
     /** Crea la suscripción al plan; devuelve su id solo si quedó activa o en prueba. Lanza excepción si Flow falla. */
     private String crearSuscripcion(String customerId) {
-        Map<String, Object> s = flow.post("/subscription/create", mapa("customerId", customerId, "planId", PLAN_ID));
+        Map<String, Object> s = flow.post("/subscription/create", mapa("customerId", customerId, "planId", planId));
         int st = s == null ? -1 : entero(s.get("status"), -1);
         if ((st == 1 || st == 2) && s.get("subscriptionId") != null) {
             return String.valueOf(s.get("subscriptionId"));

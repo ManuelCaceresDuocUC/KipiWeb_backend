@@ -250,6 +250,37 @@ public class Empresa {
     @Column(name = "flow_morosidad")
     private Integer flowMorosidad;
 
+    // ---- Prueba gratuita sin tarjeta y baja de la cuenta (ver SuscripcionService y BajaCuentaService) ----
+
+    /** Fin de la prueba gratuita; solo aplica mientras estado = PRUEBA. */
+    @JsonIgnore
+    @Column(name = "prueba_hasta")
+    private LocalDateTime pruebaHasta;
+
+    /** Último aviso de fin de prueba enviado por correo: 0 ninguno, 1 faltan ~10 días, 2 faltan ~3 días, 3 venció. */
+    @JsonIgnore
+    @Column(name = "prueba_aviso")
+    private Integer pruebaAviso;
+
+    /** Cuándo el cliente pidió dar de baja la cuenta (estado BAJA). Los datos se borran pasado el plazo de gracia. */
+    @JsonIgnore
+    @Column(name = "baja_solicitada_en")
+    private LocalDateTime bajaSolicitadaEn;
+
+    /** Cuándo se inició la inscripción de tarjeta desde el portal (evita rescatar mientras el cliente está pagando). */
+    @JsonIgnore
+    @Column(name = "flow_inscripcion_en")
+    private LocalDateTime flowInscripcionEn;
+
+    public LocalDateTime getPruebaHasta() { return pruebaHasta; }
+    public void setPruebaHasta(LocalDateTime pruebaHasta) { this.pruebaHasta = pruebaHasta; }
+    public int getPruebaAviso() { return pruebaAviso == null ? 0 : pruebaAviso; }
+    public void setPruebaAviso(Integer pruebaAviso) { this.pruebaAviso = pruebaAviso; }
+    public LocalDateTime getBajaSolicitadaEn() { return bajaSolicitadaEn; }
+    public void setBajaSolicitadaEn(LocalDateTime bajaSolicitadaEn) { this.bajaSolicitadaEn = bajaSolicitadaEn; }
+    public LocalDateTime getFlowInscripcionEn() { return flowInscripcionEn; }
+    public void setFlowInscripcionEn(LocalDateTime flowInscripcionEn) { this.flowInscripcionEn = flowInscripcionEn; }
+
     public LocalDateTime getMoraDesde() { return moraDesde; }
     public void setMoraDesde(LocalDateTime moraDesde) { this.moraDesde = moraDesde; }
     public LocalDateTime getAccesoHasta() { return accesoHasta; }

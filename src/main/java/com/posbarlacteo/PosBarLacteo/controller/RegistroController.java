@@ -37,6 +37,7 @@ import com.posbarlacteo.PosBarLacteo.exception.LimiteExcedidoException;
 import com.posbarlacteo.PosBarLacteo.security.LimiteSolicitudes;
 import com.posbarlacteo.PosBarLacteo.service.FlowClient;
 import com.posbarlacteo.PosBarLacteo.service.MailService;
+import com.posbarlacteo.PosBarLacteo.service.SuscripcionService;
 import com.posbarlacteo.PosBarLacteo.service.VerificacionCorreoService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -58,6 +59,7 @@ public class RegistroController {
     private final FlowClient flow;
     private final VerificacionCorreoService verificacionCorreo;
     private final LimiteSolicitudes limite;
+    private final SuscripcionService suscripcionService;
 
     @Value("${legal.terminos-version:2026-11-01}")
     private String terminosVigente;
@@ -65,13 +67,8 @@ public class RegistroController {
     @Value("${app.frontend.url:https://www.kipipos.cl}")
     private String frontendUrl;
 
-    @Value("${app.backend.url:http://localhost:8080}")
-    private String backendUrl;
-
     /** Minutos tras los cuales un registro sin pagar se considera abandonado y se puede reemplazar. */
     private static final long MINUTOS_REGISTRO_ABANDONADO = 30;
-
-    private static final String PLAN_ID = com.posbarlacteo.PosBarLacteo.service.SuscripcionService.PLAN_ID;
 
     // ------------------------------------------------------------------
     // REGISTRO
@@ -107,13 +104,7 @@ public class RegistroController {
         String rutEmpresa = RutUtils.normalizar(data.getEmpresa().getRut_empresa());
         log.info("Registro recibido: razonSocial={}, rut={}", data.getEmpresa().getRazon_social(), rutEmpresa);
 
-        // 1. Crear cliente en Flow
-        String customerId = crearClienteFlow(
-                data.getAdmin().getCorreo(),
-                data.getEmpresa().getRazon_social(),
-                rutEmpresa);
-
-        // 2. Obtener primera sucursal para la dirección principal de la empresa
+        // 1. Obtener primera sucursal para la dirección principal de la empresa
         RegistroEmpresaDTO.SucursalDTO primeraSucursal = (data.getSucursales() != null && !data.getSucursales().isEmpty())
                 ? data.getSucursales().get(0)
                 : null;
@@ -128,9 +119,12 @@ public class RegistroController {
             nuevaEmpresa.setComuna(primeraSucursal.getComuna());
         }
 
-        nuevaEmpresa.setFlowCustomerId(customerId);
-        nuevaEmpresa.setEstado("PENDIENTE");
-        nuevaEmpresa.setActivo(false);
+        // Prueba gratuita SIN tarjeta: la cuenta nace activa y queda en PRUEBA hasta que el cliente inscriba su tarjeta
+        // desde el portal (ver SuscripcionService.iniciarInscripcionTarjeta). No se toca Flow en el registro.
+        nuevaEmpresa.setEstado(SuscripcionService.PRUEBA);
+        nuevaEmpresa.setActivo(true);
+        nuevaEmpresa.setPruebaHasta(suscripcionService.finDePruebaDesdeAhora());
+        nuevaEmpresa.setPruebaAviso(0);
         nuevaEmpresa.setTerminosVersion(terminosVigente);
         nuevaEmpresa.setTerminosAceptadosEn(LocalDateTime.now());
         nuevaEmpresa.setTerminosIp(ip);
@@ -198,12 +192,11 @@ public class RegistroController {
             }
         }
 
-        // 4. URL de registro de tarjeta Flow
-        String urlReturn = backendUrl + "/api/auth/registro-exitoso";
-        String urlRegistroTarjeta = generarEnlaceRegistroTarjeta(customerId, urlReturn);
+        log.info("Empresa {} registrada en prueba gratuita hasta {}", nuevaEmpresa.getId(), nuevaEmpresa.getPruebaHasta());
 
-        Map<String, String> response = new HashMap<>();
-        response.put("url_pago", urlRegistroTarjeta);
+        Map<String, Object> response = new HashMap<>();
+        response.put("estado", SuscripcionService.PRUEBA);
+        response.put("pruebaHasta", nuevaEmpresa.getPruebaHasta().toString());
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -340,12 +333,23 @@ public class RegistroController {
                 log.warn("Retorno de Flow para el cliente {} sin empresa asociada (registro descartado): no se crea suscripción.", customerId);
                 return redirigir("error");
             }
+            // Solo se suscribe a quien está en prueba, a registros antiguos pendientes o ya activos (recarga del retorno).
+            // Una cuenta dada de baja (u otro estado) nunca debe terminar con una suscripción cobrándose.
+            String estadoActual = empresa.getEstado();
+            if (!SuscripcionService.PRUEBA.equals(estadoActual) && !SuscripcionService.PENDIENTE.equals(estadoActual)
+                    && !SuscripcionService.ACTIVA.equals(estadoActual)) {
+                log.warn("Retorno de Flow para la empresa {} en estado {}: no se crea suscripción.", empresa.getId(), estadoActual);
+                return redirigir("error");
+            }
+            // Si venía de la prueba gratuita, el cliente está logueado en el portal: se le devuelve allí, no al login.
+            boolean desdePortal = SuscripcionService.PRUEBA.equals(estadoActual);
+            String ok = desdePortal ? "success&origen=portal" : "success";
             if ("ACTIVA".equals(empresa.getEstado()) && empresa.getFlowSubscriptionId() != null) {
                 // Recarga del retorno de Flow: no se crea una segunda suscripción
                 return redirigir("success");
             }
 
-            Map<String, Object> suscripcion = suscribirClienteAlPlan(customerId, PLAN_ID);
+            Map<String, Object> suscripcion = suscribirClienteAlPlan(customerId, suscripcionService.planId());
             String statusStr = String.valueOf(suscripcion.get("status"));
 
             // 1 = Activa, 2 = Trial
@@ -363,8 +367,9 @@ public class RegistroController {
             empresa.setActivo(true);
             empresaRepository.save(empresa);
 
+            suscripcionService.invalidar(empresa.getId());
             log.info("Empresa activada. Suscripción ID: {}", suscripcion.get("subscriptionId"));
-            return redirigir("success");
+            return redirigir(ok);
 
         } catch (Exception e) {
             log.error("Error validando el retorno de Flow: ", e);
@@ -381,33 +386,6 @@ public class RegistroController {
     // ------------------------------------------------------------------
     // LLAMADAS A FLOW
     // ------------------------------------------------------------------
-    private String crearClienteFlow(String email, String nombre, String rutId) {
-        Map<String, String> params = new TreeMap<>();
-        params.put("name", nombre);
-        params.put("email", email);
-        params.put("externalId", rutId);
-
-        Map<String, Object> responseMap = flow.post("/customer/create", params);
-
-        if (responseMap != null && responseMap.containsKey("customerId")) {
-            return String.valueOf(responseMap.get("customerId"));
-        }
-        throw new ServicioExternoException("No se pudo crear tu cuenta de pagos. Inténtalo más tarde.");
-    }
-
-    private String generarEnlaceRegistroTarjeta(String customerId, String urlReturn) {
-        Map<String, String> params = new TreeMap<>();
-        params.put("customerId", customerId);
-        params.put("url_return", urlReturn);
-
-        Map<String, Object> responseMap = flow.post("/customer/register", params);
-
-        if (responseMap != null && responseMap.containsKey("url") && responseMap.containsKey("token")) {
-            return responseMap.get("url") + "?token=" + responseMap.get("token");
-        }
-        throw new ServicioExternoException("No se pudo generar el enlace de pago. Inténtalo más tarde.");
-    }
-
     private Map<String, Object> suscribirClienteAlPlan(String customerId, String planId) {
         Map<String, String> params = new TreeMap<>();
         params.put("customerId", customerId);

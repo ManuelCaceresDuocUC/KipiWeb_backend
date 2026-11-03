@@ -14,6 +14,8 @@ public interface EmpresaRepository extends JpaRepository<Empresa, Long> {
     /** Empresas con suscripción en Flow que se deben conciliar. */
     java.util.List<Empresa> findByFlowSubscriptionIdIsNotNullAndEstadoIn(java.util.Collection<String> estados);
 
+    java.util.List<Empresa> findByEstado(String estado);
+
     /** Registros que pagaron la tarjeta pero cuya suscripción no se alcanzó a guardar. */
     java.util.List<Empresa> findByEstadoAndFlowCustomerIdIsNotNullAndFlowSubscriptionIdIsNull(String estado);
 }
