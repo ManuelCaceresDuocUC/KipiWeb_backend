@@ -1,7 +1,10 @@
 package com.posbarlacteo.PosBarLacteo.service;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -59,13 +62,14 @@ public class VentaService {
     private final CuentaClienteService cuentaClienteService;
     private final MovimientoCajaRepository movimientoCajaRepository;
     private final InventarioService inventarioService;
+    private final AuditoriaService auditoria;
 
     public VentaService(ProductoRepository productoRepository, RecetaRepository recetaRepository,
                         VentaRepository ventaRepository, TurnoCajaRepository turnoCajaRepository,
                         UsuarioRepository usuarioRepository, ClienteRepository clienteRepository,
                         CuentaClienteService cuentaClienteService,
                         MovimientoCajaRepository movimientoCajaRepository,
-                        InventarioService inventarioService) {
+                        InventarioService inventarioService, AuditoriaService auditoria) {
         this.productoRepository = productoRepository;
         this.recetaRepository = recetaRepository;
         this.ventaRepository = ventaRepository;
@@ -75,6 +79,7 @@ public class VentaService {
         this.cuentaClienteService = cuentaClienteService;
         this.movimientoCajaRepository = movimientoCajaRepository;
         this.inventarioService = inventarioService;
+        this.auditoria = auditoria;
     }
 
     /** Venta ya registrada con esa clave (reintento del mismo cobro), si existe. */
@@ -118,6 +123,13 @@ public class VentaService {
         venta.setSucursal(usuario.getSucursal());
         venta.setTurnoId(turno.getId());
         venta.setEstado("COMPLETADA");
+        // Venta hecha sin conexión: el cobro ya ocurrió con los precios que el cajero veía
+        final boolean diferida = req.isDiferida();
+        List<String> diferenciasPrecio = new ArrayList<>();
+        if (diferida) {
+            venta.setDiferida(true);
+            venta.setOcurridaEn(parsearOcurrencia(req.getOcurrioEn()));
+        }
         if (req.getIdempotencyKey() != null && !req.getIdempotencyKey().isBlank()) {
             String clave = req.getIdempotencyKey().trim();
             if (clave.length() > 64) {
@@ -138,7 +150,7 @@ public class VentaService {
             }
             Producto producto = productoRepository.findByIdAndEmpresaId(item.getProductoId(), p.empresaId())
                     .orElseThrow(() -> new NegocioException("Producto no encontrado: " + item.getProductoId()));
-            if (!Boolean.TRUE.equals(producto.getActivo())) {
+            if (!diferida && !Boolean.TRUE.equals(producto.getActivo())) {
                 throw new NegocioException("El producto \"" + producto.getDescripcion() + "\" está desactivado.");
             }
             if (Boolean.TRUE.equals(producto.getEsInsumo())) {
@@ -161,10 +173,22 @@ public class VentaService {
             VentaDetalle detalle = new VentaDetalle();
             detalle.setProducto(producto);
             detalle.setCantidad(item.getCantidad());
-            detalle.setPrecioUnitario(producto.getPrecio());
+            double precio = producto.getPrecio();
+            if (diferida && item.getPrecioUnitario() != null) {
+                double local = item.getPrecioUnitario();
+                if (Double.isNaN(local) || Double.isInfinite(local) || local <= 0 || local > 100_000_000d) {
+                    throw new NegocioException("Hay un precio inválido en una venta guardada sin conexión.");
+                }
+                if (Math.abs(local - precio) > 0.5) {
+                    diferenciasPrecio.add(producto.getDescripcion() + " $" + Math.round(local)
+                            + " (hoy $" + Math.round(precio) + ")");
+                }
+                precio = local;
+            }
+            detalle.setPrecioUnitario(precio);
             detalle.setVenta(venta);
             detalles.add(detalle);
-            total += producto.getPrecio() * item.getCantidad();
+            total += precio * item.getCantidad();
         }
 
         long totalServidor = Math.round(total);
@@ -180,6 +204,10 @@ public class VentaService {
 
         // ---- pagos ----
         Map<String, LineaPagoDTO> lineas = normalizarPagos(req.getPagos(), totalServidor);
+        if (diferida && lineas.containsKey(PagoVenta.CREDITO)) {
+            throw new NegocioException("El fiado no se puede registrar como venta sin conexión. "
+                    + "Anótalo en el vale manual y regístralo desde Clientes.");
+        }
         List<PagoVenta> pagos = new ArrayList<>();
         for (LineaPagoDTO l : lineas.values()) {
             PagoVenta pago = new PagoVenta();
@@ -228,7 +256,7 @@ public class VentaService {
         // Stock de la sucursal de la venta, atómico y con historial; si no alcanza (y la empresa no permite
         // stock negativo) lanza NegocioException y TODA la venta se revierte.
         inventarioService.descontarVenta(p.empresaId(), usuario.getSucursal().getId(), venta.getId(),
-                p.usuario(), consumo, nombres);
+                p.usuario(), consumo, nombres, diferida);
 
         if (montoCredito > 0) {
             cargarCredito(cliente, p, venta.getId(), montoCredito);
@@ -242,7 +270,31 @@ public class VentaService {
             throw new NegocioException("El turno de caja ya no está abierto.");
         }
 
+        if (diferida) {
+            StringBuilder d = new StringBuilder("Venta N° ").append(venta.getId())
+                    .append(" cobrada sin conexión");
+            if (venta.getOcurridaEn() != null) {
+                d.append(" el ").append(venta.getOcurridaEn().format(DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm")));
+            }
+            d.append(" y registrada al volver la conexión. Total $").append(totalServidor).append('.');
+            if (!diferenciasPrecio.isEmpty()) {
+                d.append(" Precios distintos a los actuales: ").append(String.join("; ", diferenciasPrecio)).append('.');
+            }
+            auditoria.registrar(p, "VENTA_DIFERIDA", d.toString());
+        }
+
         return venta;
+    }
+
+    /** Momento real de una venta sin conexión (ISO-8601). Si no se entiende o es futuro, se ignora. */
+    private static LocalDateTime parsearOcurrencia(String iso) {
+        if (iso == null || iso.isBlank()) return null;
+        try {
+            LocalDateTime t = LocalDateTime.ofInstant(Instant.parse(iso.trim()), ZoneId.of("America/Santiago"));
+            return t.isAfter(LocalDateTime.now(ZoneId.of("America/Santiago")).plusMinutes(5)) ? null : t;
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**

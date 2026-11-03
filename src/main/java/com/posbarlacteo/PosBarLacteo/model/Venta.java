@@ -73,6 +73,14 @@ public class Venta {
     @Column(name = "dte_folio")
     private Long dteFolio;
 
+    /** true si se cobró sin conexión y se registró después (cola del dispositivo). null en ventas normales. */
+    @Column(name = "diferida")
+    private Boolean diferida;
+
+    /** Momento real en que se cobró en el local, si la venta fue diferida (la fecha oficial es fechaHora). */
+    @Column(name = "ocurrida_en")
+    private java.time.LocalDateTime ocurridaEn;
+
     @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL)
     @com.fasterxml.jackson.annotation.JsonManagedReference("pagos")
     private List<PagoVenta> pagos;

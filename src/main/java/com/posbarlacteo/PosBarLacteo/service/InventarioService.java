@@ -108,7 +108,17 @@ public class InventarioService {
     @Transactional
     public void descontarVenta(Long empresaId, Long sucursalId, Long ventaId, String usuario,
                                Map<Long, Double> consumo, Map<Long, String> nombres) {
-        boolean permiteNeg = permiteStockNegativo(empresaId);
+        descontarVenta(empresaId, sucursalId, ventaId, usuario, consumo, nombres, false);
+    }
+
+    /**
+     * Igual que el anterior; con forzarNegativo (venta diferida: la mercadería ya se entregó) se descuenta aunque
+     * el stock quede bajo cero, para que el inventario refleje lo que realmente pasó.
+     */
+    @Transactional
+    public void descontarVenta(Long empresaId, Long sucursalId, Long ventaId, String usuario,
+                               Map<Long, Double> consumo, Map<Long, String> nombres, boolean forzarNegativo) {
+        boolean permiteNeg = forzarNegativo || permiteStockNegativo(empresaId);
         new java.util.TreeMap<>(consumo).forEach((productoId, cantidad) ->
                 aplicar(empresaId, sucursalId, productoId, nombres.get(productoId), -cantidad, permiteNeg,
                         MovimientoInventario.VENTA, "Venta N° " + ventaId, usuario, ventaId));
