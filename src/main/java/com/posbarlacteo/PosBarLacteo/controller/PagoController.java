@@ -22,6 +22,7 @@ import com.posbarlacteo.PosBarLacteo.model.Venta;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 import com.posbarlacteo.PosBarLacteo.service.DteService;
+import com.posbarlacteo.PosBarLacteo.service.FiadoCorreoService;
 import com.posbarlacteo.PosBarLacteo.service.ValeCreditoPdfService;
 import com.posbarlacteo.PosBarLacteo.service.VentaService;
 
@@ -33,11 +34,14 @@ public class PagoController {
     private final VentaService ventaService;
     private final DteService dteService;
     private final ValeCreditoPdfService valeService;
+    private final FiadoCorreoService fiadoCorreo;
 
-    public PagoController(VentaService ventaService, DteService dteService, ValeCreditoPdfService valeService) {
+    public PagoController(VentaService ventaService, DteService dteService, ValeCreditoPdfService valeService,
+                          FiadoCorreoService fiadoCorreo) {
         this.ventaService = ventaService;
         this.dteService = dteService;
         this.valeService = valeService;
+        this.fiadoCorreo = fiadoCorreo;
     }
 
     /** Endpoint principal: una o varias formas de pago (request.pagos) que deben sumar el total. */
@@ -119,6 +123,16 @@ public class PagoController {
                     venta.getEmpresa() != null ? venta.getEmpresa().getRazonSocial() : null);
         }
         cuerpo.put("valePdf", vale == null ? "" : vale);
+        // Fiado: el cliente recibe por correo el comprobante de lo que quedó a su nombre (si tiene correo)
+        boolean correoFiado = false;
+        if (metodos.contains(PagoVenta.CREDITO)) {
+            long montoCredito = venta.getPagos().stream()
+                    .filter(pg -> PagoVenta.CREDITO.equals(pg.getMetodo()))
+                    .mapToLong(pg -> pg.getMonto() == null ? 0L : pg.getMonto()).sum();
+            correoFiado = fiadoCorreo.enviarComprobante(venta, montoCredito, vale,
+                    request.isFiadoManual() ? request.getNumeroVale() : null);
+        }
+        cuerpo.put("correoFiadoEnviado", correoFiado);
         cuerpo.put("tieneTransferencia", metodos.contains(PagoVenta.TRANSFERENCIA));
         return ResponseEntity.ok(cuerpo);
     }

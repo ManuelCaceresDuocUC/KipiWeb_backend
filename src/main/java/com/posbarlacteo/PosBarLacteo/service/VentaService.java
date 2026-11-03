@@ -37,6 +37,7 @@ import com.posbarlacteo.PosBarLacteo.model.Venta;
 import com.posbarlacteo.PosBarLacteo.model.VentaDetalle;
 import com.posbarlacteo.PosBarLacteo.repository.ClienteRepository;
 import com.posbarlacteo.PosBarLacteo.repository.MovimientoCajaRepository;
+import com.posbarlacteo.PosBarLacteo.repository.PagoVentaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
 import com.posbarlacteo.PosBarLacteo.repository.RecetaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.TurnoCajaRepository;
@@ -63,13 +64,15 @@ public class VentaService {
     private final MovimientoCajaRepository movimientoCajaRepository;
     private final InventarioService inventarioService;
     private final AuditoriaService auditoria;
+    private final PagoVentaRepository pagoVentaRepository;
 
     public VentaService(ProductoRepository productoRepository, RecetaRepository recetaRepository,
                         VentaRepository ventaRepository, TurnoCajaRepository turnoCajaRepository,
                         UsuarioRepository usuarioRepository, ClienteRepository clienteRepository,
                         CuentaClienteService cuentaClienteService,
                         MovimientoCajaRepository movimientoCajaRepository,
-                        InventarioService inventarioService, AuditoriaService auditoria) {
+                        InventarioService inventarioService, AuditoriaService auditoria,
+                        PagoVentaRepository pagoVentaRepository) {
         this.productoRepository = productoRepository;
         this.recetaRepository = recetaRepository;
         this.ventaRepository = ventaRepository;
@@ -80,6 +83,7 @@ public class VentaService {
         this.movimientoCajaRepository = movimientoCajaRepository;
         this.inventarioService = inventarioService;
         this.auditoria = auditoria;
+        this.pagoVentaRepository = pagoVentaRepository;
     }
 
     /** Venta ya registrada con esa clave (reintento del mismo cobro), si existe. */
@@ -124,7 +128,13 @@ public class VentaService {
         venta.setTurnoId(turno.getId());
         venta.setEstado("COMPLETADA");
         // Venta hecha sin conexión: el cobro ya ocurrió con los precios que el cajero veía
-        final boolean diferida = req.isDiferida();
+        // Fiado de vale manual: es una venta diferida (precio y stock se respetan como estaban) pero a crédito
+        final boolean fiadoManual = req.isFiadoManual();
+        final boolean diferida = req.isDiferida() || fiadoManual;
+        final String numeroVale = fiadoManual ? limpiarVale(req.getNumeroVale()) : null;
+        if (fiadoManual && numeroVale == null) {
+            throw new NegocioException("Indica el N° que lleva el vale de papel.");
+        }
         List<String> diferenciasPrecio = new ArrayList<>();
         if (diferida) {
             venta.setDiferida(true);
@@ -204,9 +214,20 @@ public class VentaService {
 
         // ---- pagos ----
         Map<String, LineaPagoDTO> lineas = normalizarPagos(req.getPagos(), totalServidor);
-        if (diferida && lineas.containsKey(PagoVenta.CREDITO)) {
+        if (diferida && !fiadoManual && lineas.containsKey(PagoVenta.CREDITO)) {
             throw new NegocioException("El fiado no se puede registrar como venta sin conexión. "
-                    + "Anótalo en el vale manual y regístralo desde Clientes.");
+                    + "Anótalo en el vale manual y regístralo con \"Registrar fiado desde vale\".");
+        }
+        String referenciaVale = null;
+        if (fiadoManual) {
+            if (lineas.size() != 1 || !lineas.containsKey(PagoVenta.CREDITO)) {
+                throw new NegocioException("Un vale de fiado se registra completo a crédito.");
+            }
+            referenciaVale = "Vale manual " + numeroVale;
+            if (pagoVentaRepository.contarPorReferencia(p.empresaId(), referenciaVale) > 0) {
+                throw new ConflictoException("El vale " + numeroVale + " ya está registrado. "
+                        + "Si es otro vale, revisa el número que trae impreso.");
+            }
         }
         List<PagoVenta> pagos = new ArrayList<>();
         for (LineaPagoDTO l : lineas.values()) {
@@ -214,7 +235,8 @@ public class VentaService {
             pago.setVenta(venta);
             pago.setMetodo(l.getMetodo());
             pago.setMonto(l.getMonto());
-            pago.setReferencia(limpiar(l.getReferencia(), 100));
+            pago.setReferencia(PagoVenta.CREDITO.equals(l.getMetodo()) && referenciaVale != null
+                    ? referenciaVale : limpiar(l.getReferencia(), 100));
             if (PagoVenta.TARJETA.equals(l.getMetodo())) {
                 String prov = l.getProveedorTarjeta() == null ? null : l.getProveedorTarjeta().trim().toUpperCase();
                 if (prov != null && !prov.isEmpty() && !PROVEEDORES_TARJETA.contains(prov)) {
@@ -259,7 +281,7 @@ public class VentaService {
                 p.usuario(), consumo, nombres, diferida);
 
         if (montoCredito > 0) {
-            cargarCredito(cliente, p, venta.getId(), montoCredito);
+            cargarCredito(cliente, p, venta.getId(), montoCredito, numeroVale);
         }
 
         // Totales del turno: una sola sentencia atómica (no pisa lo que otro proceso sume al mismo tiempo)
@@ -270,7 +292,18 @@ public class VentaService {
             throw new NegocioException("El turno de caja ya no está abierto.");
         }
 
-        if (diferida) {
+        if (fiadoManual) {
+            StringBuilder d = new StringBuilder("Fiado de vale manual ").append(numeroVale)
+                    .append(" registrado en venta N° ").append(venta.getId()).append(" por $").append(totalServidor)
+                    .append(" a ").append(cliente != null ? cliente.getNombre() : "cliente");
+            if (venta.getOcurridaEn() != null) {
+                d.append(". Fecha del vale: ").append(venta.getOcurridaEn().format(DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm")));
+            }
+            if (!diferenciasPrecio.isEmpty()) {
+                d.append(". Precios distintos a los actuales: ").append(String.join("; ", diferenciasPrecio));
+            }
+            auditoria.registrar(p, "FIADO_MANUAL", d.toString());
+        } else if (diferida) {
             StringBuilder d = new StringBuilder("Venta N° ").append(venta.getId())
                     .append(" cobrada sin conexión");
             if (venta.getOcurridaEn() != null) {
@@ -444,7 +477,17 @@ public class VentaService {
         return resultado;
     }
 
-    private void cargarCredito(Cliente cliente, AuthPrincipal p, Long ventaId, long monto) {
+    private static String limpiarVale(String numero) {
+        if (numero == null) return null;
+        String n = numero.trim().replaceAll("\\s+", " ").toUpperCase();
+        if (n.isEmpty()) return null;
+        if (n.length() > 30 || !n.matches("[A-Z0-9 ._/-]+")) {
+            throw new NegocioException("El N° de vale solo puede llevar letras, números y guiones (máx. 30).");
+        }
+        return n;
+    }
+
+    private void cargarCredito(Cliente cliente, AuthPrincipal p, Long ventaId, long monto, String numeroVale) {
         int filas = clienteRepository.cargarDeudaConLimite(cliente.getId(), p.empresaId(), monto);
         if (filas == 0) {
             double limite = nz(cliente.getLimiteCredito());
@@ -458,7 +501,7 @@ public class VentaService {
                     + "\". Disponible: $" + Math.round(disponible) + ", solicitado: $" + monto + ".");
         }
         cuentaClienteService.registrar(cliente, p, MovimientoCliente.CARGO, monto, ventaId, PagoVenta.CREDITO,
-                "Venta N° " + ventaId + " a crédito");
+                "Venta N° " + ventaId + " a crédito" + (numeroVale != null ? " (vale manual " + numeroVale + ")" : ""));
     }
 
     private static BigDecimal monto(Map<String, LineaPagoDTO> lineas, String metodo) {

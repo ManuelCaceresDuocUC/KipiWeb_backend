@@ -31,6 +31,15 @@ public class PagoRequest {
     /** Momento real de la venta en el local (ISO-8601). Solo informativo: la fecha oficial es la del envío. */
     private String ocurrioEn;
 
+    /**
+     * Fiado anotado a mano en un vale de papel (porque no había conexión) y registrado después. Es una venta
+     * diferida a crédito: exige cliente, N° de vale y se descuenta del cupo del cliente como cualquier fiado.
+     */
+    private boolean fiadoManual;
+
+    /** N° impreso en el vale de papel. Obligatorio con fiadoManual; no se puede repetir dentro de la empresa. */
+    private String numeroVale;
+
     // Los completa PagoController desde el token; se usan internamente (DteService / voucher).
     private Long usuarioId;
     private Long empresaId;
