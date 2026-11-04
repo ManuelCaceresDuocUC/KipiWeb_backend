@@ -67,6 +67,11 @@ public class ComprobanteService {
 
     /** Valida (tamaño y tipo REAL por firma del archivo, no por lo que declare el navegador) y sube. */
     public Archivo subir(Long empresaId, Long ventaId, MultipartFile archivo) {
+        return subirEn(empresaId, "ventas", ventaId, archivo);
+    }
+
+    /** Igual que subir, pero en otra carpeta del bucket (p. ej. "compras" para las facturas de proveedores). */
+    public Archivo subirEn(Long empresaId, String carpeta, Long id, MultipartFile archivo) {
         exigirHabilitado();
         if (archivo == null || archivo.isEmpty()) {
             throw new NegocioException("Debes adjuntar un archivo.");
@@ -85,7 +90,7 @@ public class ComprobanteService {
             throw new NegocioException("Formato no permitido. Sube una imagen (JPG, PNG, WEBP) o un PDF.");
         }
 
-        String key = "empresas/" + empresaId + "/ventas/" + ventaId + "/" + UUID.randomUUID() + "." + tipo[1];
+        String key = "empresas/" + empresaId + "/" + carpeta + "/" + id + "/" + UUID.randomUUID() + "." + tipo[1];
         try {
             cliente().putObject(PutObjectRequest.builder()
                     .bucket(bucket).key(key).contentType(tipo[0])
