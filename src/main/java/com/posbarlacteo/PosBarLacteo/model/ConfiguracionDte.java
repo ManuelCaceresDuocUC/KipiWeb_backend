@@ -52,6 +52,13 @@ public class ConfiguracionDte {
     @Column(name = "emitir_boleta_transferencia")
     private boolean emitirBoletaTransferencia = true;
 
+    /**
+     * Emitir boleta cuando un cliente paga (total o parcialmente) su deuda de fiado. Se usa Boolean (no boolean)
+     * porque la columna es nueva y las empresas ya existentes quedan en NULL = desactivado.
+     */
+    @Column(name = "emitir_boleta_abono")
+    private Boolean emitirBoletaAbono = false;
+
     @Column(name = "activo")
     private boolean activo = true;
 

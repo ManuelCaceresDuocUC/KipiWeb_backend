@@ -37,6 +37,8 @@ import com.posbarlacteo.PosBarLacteo.repository.ConfiguracionDteRepository;
 import com.posbarlacteo.PosBarLacteo.repository.DocumentoTributarioRepository;
 import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.VentaRepository;
+import com.posbarlacteo.PosBarLacteo.model.MovimientoCliente;
+import com.posbarlacteo.PosBarLacteo.repository.MovimientoClienteRepository;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 
 /**
@@ -63,11 +65,12 @@ public class DteService {
     private final ComprobanteService comprobanteService;
     private final DteProveedorRegistry registry;
     private final EmpresaRepository empresaRepository;
+    private final MovimientoClienteRepository movimientoRepository;
 
     public DteService(ConfiguracionDteRepository configDteRepository, DocumentoTributarioRepository documentoRepository,
                       VentaRepository ventaRepository, VoucherService voucherService,
                       ComprobanteService comprobanteService, DteProveedorRegistry registry,
-                      EmpresaRepository empresaRepository) {
+                      EmpresaRepository empresaRepository, MovimientoClienteRepository movimientoRepository) {
         this.configDteRepository = configDteRepository;
         this.documentoRepository = documentoRepository;
         this.ventaRepository = ventaRepository;
@@ -75,6 +78,7 @@ public class DteService {
         this.comprobanteService = comprobanteService;
         this.registry = registry;
         this.empresaRepository = empresaRepository;
+        this.movimientoRepository = movimientoRepository;
     }
 
     /** Datos tributarios de la empresa tal como quedaron en su registro (null si no se encuentra). */
@@ -138,12 +142,80 @@ public class DteService {
         }
     }
 
+
+    // ------------------------------------------------------------------------------------------
+    // Boleta por pago de deuda (abono de fiado)
+    // ------------------------------------------------------------------------------------------
+
+    /**
+     * Un abono no es una venta (no mueve stock ni suma a los reportes de ventas), pero tributariamente puede
+     * necesitar su boleta. Se reutiliza todo el motor de emisión usando como identificador del documento el
+     * movimiento de la cuenta del cliente en NEGATIVO: así no choca nunca con el id de una venta real.
+     */
+    public static long idDocumentoAbono(Long movimientoId) {
+        return -movimientoId;
+    }
+
+    /**
+     * Se llama DESPUÉS de confirmar el abono. Nunca lanza: si algo falla, el abono ya está registrado y la boleta
+     * queda pendiente de reintento. NO_APLICA si la empresa no tiene activada la boleta por abonos.
+     */
+    public Emision documentoDeAbono(Long movimientoId, double monto, String metodoPago, String nombreCliente, AuthPrincipal p) {
+        try {
+            ConfiguracionDte config = configDteRepository.findByEmpresaId(p.empresaId()).orElse(null);
+            if (config == null || "ninguno".equalsIgnoreCase(config.getProveedor()) || !config.isActivo()
+                    || !Boolean.TRUE.equals(config.getEmitirBoletaAbono()) || !debeEmitir(config, List.of(metodoPago))) {
+                return new Emision("NO_APLICA", null, null, null);
+            }
+            return emitir(DocumentoTributario.BOLETA, p.empresaId(), idDocumentoAbono(movimientoId), p.usuario(),
+                    solicitudAbono(movimientoId, monto, nombreCliente), config, null, false);
+        } catch (RuntimeException e) {
+            log.error("No se pudo preparar la boleta del abono {}: {}", movimientoId, e.getMessage(), e);
+            return new Emision(DocumentoTributario.PENDIENTE, null,
+                    "El abono quedó registrado, pero la boleta no se pudo emitir: " + e.getMessage(), null);
+        }
+    }
+
+    private SolicitudDte solicitudAbono(Long movimientoId, double monto, String nombreCliente) {
+        long total = Math.round(monto);
+        String detalle = "Pago de cuenta (abono a deuda)";
+        List<LineaDte> lineas = List.of(new LineaDte(detalle, 1.0, total, total));
+        return new SolicitudDte(idDocumentoAbono(movimientoId), LocalDate.now(), total, lineas, null, null, null);
+    }
+
+    private Emision reintentarBoletaAbono(AuthPrincipal p, Long idDocumento, boolean forzar) {
+        Long movId = -idDocumento;
+        MovimientoCliente mov = movimientoRepository.buscarDeEmpresa(movId, p.empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Abono no encontrado."));
+        if (forzar && !p.esAdmin()) {
+            throw new AccesoDenegadoException("Solo un administrador puede reintentar una boleta marcada para revisión.");
+        }
+        DocumentoTributario doc = documentoRepository
+                .findByEmpresaIdAndVentaIdAndTipoDte(p.empresaId(), idDocumento, DocumentoTributario.BOLETA)
+                .orElseThrow(() -> new NegocioException("Este abono no tiene una boleta electrónica pendiente."));
+        if (DocumentoTributario.EMITIDO.equals(doc.getEstado())) {
+            throw new NegocioException("La boleta ya fue emitida (folio " + doc.getFolio() + ").");
+        }
+        ConfiguracionDte config = null;
+        String errorConfig = null;
+        try {
+            config = configDteRepository.findByEmpresaId(p.empresaId()).orElse(null);
+        } catch (RuntimeException e) {
+            errorConfig = "No se pudo leer la configuración de facturación (revisa DTE_ENCRYPTION_KEY en el servidor).";
+        }
+        return emitir(DocumentoTributario.BOLETA, p.empresaId(), idDocumento, p.usuario(),
+                solicitudAbono(movId, Math.abs(mov.getMonto()), null), config, errorConfig, forzar);
+    }
+
     // ------------------------------------------------------------------------------------------
     // Reintentos y consultas
     // ------------------------------------------------------------------------------------------
 
     /** Reintenta una boleta PENDIENTE. Una REVISAR solo la reintenta un administrador que ya verificó en el portal. */
     public Emision reintentarBoleta(AuthPrincipal p, Long ventaId, boolean forzar) {
+        if (ventaId != null && ventaId < 0) {
+            return reintentarBoletaAbono(p, ventaId, forzar); // boleta de un pago de deuda, no de una venta
+        }
         Venta venta = ventaRepository.findByIdAndEmpresaId(ventaId, p.empresaId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Venta no encontrada."));
         if ("ANULADA".equals(venta.getEstado())) {
@@ -181,8 +253,13 @@ public class DteService {
     }
 
     private String pdfDocumento(AuthPrincipal p, Long ventaId, int tipo, String nombre) {
-        ventaRepository.findByIdAndEmpresaId(ventaId, p.empresaId())
-                .orElseThrow(() -> new RecursoNoEncontradoException("Venta no encontrada."));
+        if (ventaId != null && ventaId < 0) {
+            movimientoRepository.buscarDeEmpresa(-ventaId, p.empresaId())
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Abono no encontrado."));
+        } else {
+            ventaRepository.findByIdAndEmpresaId(ventaId, p.empresaId())
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Venta no encontrada."));
+        }
         DocumentoTributario doc = documentoRepository
                 .findByEmpresaIdAndVentaIdAndTipoDte(p.empresaId(), ventaId, tipo)
                 .orElseThrow(() -> new NegocioException("Esta venta no tiene " + (tipo == DocumentoTributario.BOLETA ? "boleta electrónica." : "nota de crédito.")));

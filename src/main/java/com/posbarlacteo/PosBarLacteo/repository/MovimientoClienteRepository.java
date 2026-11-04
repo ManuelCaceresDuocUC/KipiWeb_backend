@@ -12,6 +12,9 @@ import com.posbarlacteo.PosBarLacteo.model.MovimientoCliente;
 @Repository
 public interface MovimientoClienteRepository extends JpaRepository<MovimientoCliente, Long> {
 
+    @Query("SELECT m FROM MovimientoCliente m WHERE m.id = :id AND m.empresa.id = :empresaId")
+    java.util.Optional<MovimientoCliente> buscarDeEmpresa(@Param("id") Long id, @Param("empresaId") Long empresaId);
+
     @Query("SELECT m FROM MovimientoCliente m WHERE m.cliente.id = :clienteId AND m.empresa.id = :empresaId ORDER BY m.id DESC")
     Page<MovimientoCliente> porCliente(@Param("clienteId") Long clienteId,
                                        @Param("empresaId") Long empresaId, Pageable pageable);

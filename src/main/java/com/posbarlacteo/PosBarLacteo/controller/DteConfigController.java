@@ -133,6 +133,7 @@ public class DteConfigController {
         config.setEmitirBoletaEfectivo(payload.isEmitirBoletaEfectivo());
         config.setEmitirBoletaTarjeta(payload.isEmitirBoletaTarjeta());
         config.setEmitirBoletaTransferencia(payload.isEmitirBoletaTransferencia());
+        config.setEmitirBoletaAbono(Boolean.TRUE.equals(payload.getEmitirBoletaAbono()));
 
         repository.save(config);
         // Nunca se registra la llave: solo qué cambió

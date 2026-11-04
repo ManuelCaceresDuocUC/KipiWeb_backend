@@ -9,6 +9,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,6 +32,7 @@ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 import com.posbarlacteo.PosBarLacteo.service.CajaService;
 import com.posbarlacteo.PosBarLacteo.service.CuentaClienteService;
+import com.posbarlacteo.PosBarLacteo.service.DteService;
 import com.posbarlacteo.PosBarLacteo.service.EstadoCuentaPdfService;
 import com.posbarlacteo.PosBarLacteo.service.MailService;
 import com.posbarlacteo.PosBarLacteo.service.ValeCreditoPdfService;
@@ -48,12 +50,15 @@ public class ClienteController {
     private final MovimientoClienteRepository movimientoClienteRepository;
     private final EstadoCuentaPdfService estadoCuentaPdfService;
     private final MailService mailService;
+    private final DteService dteService;
+    private final TransactionTemplate transaccion;
 
     public ClienteController(ClienteRepository clienteRepository, EmpresaRepository empresaRepository,
                              CajaService cajaService, ValeCreditoPdfService valeCreditoPdfService,
                              CuentaClienteService cuentaClienteService,
                              MovimientoClienteRepository movimientoClienteRepository,
-                             EstadoCuentaPdfService estadoCuentaPdfService, MailService mailService) {
+                             EstadoCuentaPdfService estadoCuentaPdfService, MailService mailService,
+                             DteService dteService, TransactionTemplate transaccion) {
         this.clienteRepository = clienteRepository;
         this.empresaRepository = empresaRepository;
         this.cajaService = cajaService;
@@ -62,6 +67,8 @@ public class ClienteController {
         this.movimientoClienteRepository = movimientoClienteRepository;
         this.estadoCuentaPdfService = estadoCuentaPdfService;
         this.mailService = mailService;
+        this.dteService = dteService;
+        this.transaccion = transaccion;
     }
 
     @PostMapping
@@ -133,13 +140,14 @@ public class ClienteController {
         return ResponseEntity.ok(clienteRepository.buscarPorTerminoYEmpresa(original, limpio, p.empresaId()));
     }
 
+    /**
+     * Registra el pago (total o parcial) de la deuda de un cliente. La parte de base de datos va en una sola
+     * transacción; la boleta electrónica (llamada externa al proveedor) se emite DESPUÉS de confirmarla, para no
+     * mantener una transacción abierta mientras se espera al proveedor ni arriesgar un rollback con la boleta ya emitida.
+     */
     @PostMapping("/{id}/abonar")
-    @Transactional
     public ResponseEntity<?> abonarDeuda(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
         AuthPrincipal p = SecurityUtils.actual();
-
-        Cliente cliente = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
-                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
 
         double monto;
         try {
@@ -150,31 +158,49 @@ public class ClienteController {
         if (monto <= 0 || Double.isNaN(monto) || Double.isInfinite(monto)) {
             throw new NegocioException("El monto del abono debe ser mayor a 0.");
         }
-        double deudaAntes = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
         Object mp = payload.get("metodoPago");
         String metodoPago = mp != null ? mp.toString().toUpperCase() : "EFECTIVO";
+        final double montoFinal = monto;
 
-        // Primero la caja: si no hay turno abierto, falla antes de tocar la deuda
-        cajaService.registrarAbono(p, BigDecimal.valueOf(monto), metodoPago, cliente.getId(), cliente.getNombre());
+        Map<String, Object> hecho = transaccion.execute(status -> {
+            Cliente cliente = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
+            double deudaAntes = cliente.getDeudaActual() != null ? cliente.getDeudaActual() : 0.0;
 
-        // Atómico: solo descuenta si la deuda actual alcanza (si no, se revierte también el registro de caja)
-        if (clienteRepository.abonarDeuda(cliente.getId(), p.empresaId(), monto) == 0) {
-            throw new NegocioException("El monto del abono no puede ser mayor a la deuda actual.");
-        }
-        cuentaClienteService.registrar(cliente, p, MovimientoCliente.ABONO, -monto, null, metodoPago, "Abono del cliente");
+            // Primero la caja: si no hay turno abierto, falla antes de tocar la deuda
+            cajaService.registrarAbono(p, BigDecimal.valueOf(montoFinal), metodoPago, cliente.getId(), cliente.getNombre());
 
-        double saldo = clienteRepository.saldoActual(cliente.getId(), p.empresaId());
-        cliente.setDeudaActual(saldo);
+            // Atómico: solo descuenta si la deuda actual alcanza (si no, se revierte también el registro de caja)
+            if (clienteRepository.abonarDeuda(cliente.getId(), p.empresaId(), montoFinal) == 0) {
+                throw new NegocioException("El monto del abono no puede ser mayor a la deuda actual.");
+            }
+            MovimientoCliente mov = cuentaClienteService.registrar(cliente, p, MovimientoCliente.ABONO, -montoFinal,
+                    null, metodoPago, "Abono del cliente");
 
-        String local = cliente.getEmpresa() != null ? cliente.getEmpresa().getRazonSocial() : "Local";
-        String comprobante = valeCreditoPdfService.generarAbonoBase64(
-                cliente.getNombre(), cliente.getRut(), monto, deudaAntes,
-                saldo, metodoPago, local);
+            double saldo = clienteRepository.saldoActual(cliente.getId(), p.empresaId());
+            cliente.setDeudaActual(saldo);
 
-        Map<String, Object> respuesta = new LinkedHashMap<>();
-        respuesta.put("cliente", cliente);
-        respuesta.put("comprobantePdf", comprobante == null ? "" : comprobante);
-        return ResponseEntity.ok(respuesta);
+            String local = cliente.getEmpresa() != null ? cliente.getEmpresa().getRazonSocial() : "Local";
+            String comprobante = valeCreditoPdfService.generarAbonoBase64(
+                    cliente.getNombre(), cliente.getRut(), montoFinal, deudaAntes, saldo, metodoPago, local);
+
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("cliente", cliente);
+            r.put("comprobantePdf", comprobante == null ? "" : comprobante);
+            r.put("movimientoId", mov.getId());
+            r.put("nombreCliente", cliente.getNombre());
+            return r;
+        });
+
+        // Ya confirmado: ahora la boleta (si la empresa la tiene activada para pagos de deuda)
+        Long movimientoId = (Long) hecho.remove("movimientoId");
+        String nombre = (String) hecho.remove("nombreCliente");
+        DteService.Emision dte = dteService.documentoDeAbono(movimientoId, monto, metodoPago, nombre, p);
+        hecho.put("boletaPdf", dte.pdf() == null ? "" : dte.pdf());
+        hecho.put("dteEstado", dte.estado());
+        hecho.put("dteFolio", dte.folio());
+        hecho.put("dteAviso", dte.aviso() == null ? "" : dte.aviso());
+        return ResponseEntity.ok(hecho);
     }
 
     /** Envía por correo el estado de cuenta (últimos 100 movimientos). Body: {"email": "..."} (opcional: usa el del cliente). */

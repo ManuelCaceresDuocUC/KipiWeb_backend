@@ -23,7 +23,7 @@ public class CuentaClienteService {
 
     /** Debe llamarse DESPUÉS del UPDATE atómico de la deuda: lee el saldo que quedó en la base. */
     @Transactional
-    public void registrar(Cliente cliente, AuthPrincipal p, String tipo, double montoConSigno,
+    public MovimientoCliente registrar(Cliente cliente, AuthPrincipal p, String tipo, double montoConSigno,
                           Long ventaId, String metodo, String motivo) {
         MovimientoCliente m = new MovimientoCliente();
         m.setCliente(cliente);
@@ -36,6 +36,6 @@ public class CuentaClienteService {
         m.setMetodoPago(metodo);
         m.setMotivo(motivo);
         m.setUsuarioNombre(p.usuario());
-        movimientos.save(m);
+        return movimientos.save(m);
     }
 }
