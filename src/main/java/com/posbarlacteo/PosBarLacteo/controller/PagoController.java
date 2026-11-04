@@ -23,6 +23,7 @@ import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 import com.posbarlacteo.PosBarLacteo.service.DteService;
 import com.posbarlacteo.PosBarLacteo.service.FiadoCorreoService;
+import com.posbarlacteo.PosBarLacteo.util.PdfUnionUtil;
 import com.posbarlacteo.PosBarLacteo.service.ValeCreditoPdfService;
 import com.posbarlacteo.PosBarLacteo.service.VentaService;
 
@@ -123,6 +124,12 @@ public class PagoController {
                     venta.getEmpresa() != null ? venta.getEmpresa().getRazonSocial() : null);
         }
         cuerpo.put("valePdf", vale == null ? "" : vale);
+        // Ticket + vale en un solo PDF: se imprimen en un único trabajo y el vale para firmar nunca se pierde
+        String impresion = null;
+        if (vale != null && !vale.isBlank() && doc.pdf() != null && !doc.pdf().isBlank()) {
+            impresion = PdfUnionUtil.unirBase64(List.of(doc.pdf(), vale));
+        }
+        cuerpo.put("impresionPdf", impresion == null ? "" : impresion);
         // Fiado: el cliente recibe por correo el comprobante de lo que quedó a su nombre (si tiene correo)
         boolean correoFiado = false;
         if (metodos.contains(PagoVenta.CREDITO)) {
