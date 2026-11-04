@@ -133,6 +133,9 @@ public class DteService {
 
     private String voucherLocal(Venta venta, PagoRequest request) {
         try {
+            if (request != null && request.isSoloCopiaLocal()) {
+                return voucherService.generarVoucherSoloLocalBase64(venta, request.getItems());
+            }
             int copias = request != null && request.getCopiasTicket() != null
                     ? Math.min(Math.max(request.getCopiasTicket(), 1), 2) : 2;
             return voucherService.generarVoucherBase64(venta, request != null ? request.getItems() : null, copias);

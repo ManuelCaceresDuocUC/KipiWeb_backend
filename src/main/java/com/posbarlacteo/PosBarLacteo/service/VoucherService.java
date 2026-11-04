@@ -41,6 +41,11 @@ public class VoucherService {
     /**
      * @param copias 1 = solo la copia del cliente (ahorra papel); 2 = cliente y local
      */
+    /** Ticket con solo la copia del local (cuando el cliente no se lleva comprobante impreso). */
+    public String generarVoucherSoloLocalBase64(Venta venta, List<?> items) throws Exception {
+        return PdfTicketUtil.generarBase64(document -> agregarCopiaVoucher(document, venta, items, "COPIA LOCAL / CONTROL INTERNO"));
+    }
+
     public String generarVoucherBase64(Venta venta, List<?> items, int copias) throws Exception {
         if (copias <= 1) {
             return PdfTicketUtil.generarBase64(document -> agregarCopiaVoucher(document, venta, items, null));

@@ -31,6 +31,12 @@ public class PagoRequest {
     /** Copias del comprobante interno de venta (1 = solo cliente, 2 = cliente y local). Vacío = 2 (comportamiento anterior). */
     private Integer copiasTicket;
 
+    /**
+     * El cliente no se lleva comprobante en papel (lo pidió por correo o no quiso): el ticket trae solo la copia
+     * del local, para la empresas que tienen activadas las 2 copias.
+     */
+    private boolean soloCopiaLocal;
+
     /** Momento real de la venta en el local (ISO-8601). Solo informativo: la fecha oficial es la del envío. */
     private String ocurrioEn;
 
