@@ -28,6 +28,9 @@ public class PagoRequest {
     /** Venta hecha sin conexión y enviada después: se acepta aunque cambien precios o stock desde que se cobró. */
     private boolean diferida;
 
+    /** Copias del comprobante interno de venta (1 = solo cliente, 2 = cliente y local). Vacío = 2 (comportamiento anterior). */
+    private Integer copiasTicket;
+
     /** Momento real de la venta en el local (ISO-8601). Solo informativo: la fecha oficial es la del envío. */
     private String ocurrioEn;
 

@@ -129,7 +129,9 @@ public class DteService {
 
     private String voucherLocal(Venta venta, PagoRequest request) {
         try {
-            return voucherService.generarVoucherBase64(venta, request != null ? request.getItems() : null);
+            int copias = request != null && request.getCopiasTicket() != null
+                    ? Math.min(Math.max(request.getCopiasTicket(), 1), 2) : 2;
+            return voucherService.generarVoucherBase64(venta, request != null ? request.getItems() : null, copias);
         } catch (Exception e) {
             log.error("Error generando voucher local para venta {}: {}", venta.getId(), e.getMessage(), e);
             return "";

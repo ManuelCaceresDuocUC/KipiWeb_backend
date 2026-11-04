@@ -126,8 +126,14 @@ public class PagoController {
         cuerpo.put("valePdf", vale == null ? "" : vale);
         // Ticket + vale en un solo PDF: se imprimen en un único trabajo y el vale para firmar nunca se pierde
         String impresion = null;
-        if (vale != null && !vale.isBlank() && doc.pdf() != null && !doc.pdf().isBlank()) {
-            impresion = PdfUnionUtil.unirBase64(List.of(doc.pdf(), vale));
+        if (vale != null && !vale.isBlank()) {
+            if (metodos.size() == 1) {
+                // Venta 100 % a crédito: el vale ya trae el detalle, el total y la firma. Imprimir además el
+                // comprobante de venta duplicaría el papel sin aportar nada.
+                impresion = vale;
+            } else if (doc.pdf() != null && !doc.pdf().isBlank()) {
+                impresion = PdfUnionUtil.unirBase64(List.of(doc.pdf(), vale));
+            }
         }
         cuerpo.put("impresionPdf", impresion == null ? "" : impresion);
         // Fiado: el cliente recibe por correo el comprobante de lo que quedó a su nombre (si tiene correo)

@@ -35,6 +35,16 @@ public class VoucherService {
 
     /** Ticket 80 mm con las dos copias; el alto de la página se ajusta al contenido. */
     public String generarVoucherBase64(Venta venta, List<?> items) throws Exception {
+        return generarVoucherBase64(venta, items, 2);
+    }
+
+    /**
+     * @param copias 1 = solo la copia del cliente (ahorra papel); 2 = cliente y local
+     */
+    public String generarVoucherBase64(Venta venta, List<?> items, int copias) throws Exception {
+        if (copias <= 1) {
+            return PdfTicketUtil.generarBase64(document -> agregarCopiaVoucher(document, venta, items, null));
+        }
         return PdfTicketUtil.generarBase64(document -> {
             // 1. COPIA CLIENTE
             agregarCopiaVoucher(document, venta, items, "COPIA CLIENTE");
@@ -82,16 +92,23 @@ public class VoucherService {
             infoEmpresa.append("Giro: ").append(empresa.getGiro()).append("\n");
         }
 
-        String dir = (empresa != null && empresa.getDireccion() != null) ? empresa.getDireccion() : "Arturo Prat 527";
-        String comuna = (empresa != null && empresa.getComuna() != null) ? empresa.getComuna() : "Curicó";
-        infoEmpresa.append(dir).append(", ").append(comuna);
+        // Solo se imprime lo que la empresa tiene registrado (nunca la dirección de otro negocio)
+        String dir = (empresa != null && empresa.getDireccion() != null) ? empresa.getDireccion().trim() : "";
+        String comuna = (empresa != null && empresa.getComuna() != null) ? empresa.getComuna().trim() : "";
+        String ubicacion = dir.isEmpty() ? comuna : (comuna.isEmpty() ? dir : dir + ", " + comuna);
+        infoEmpresa.append(ubicacion);
 
-        Paragraph dirParagraph = new Paragraph(infoEmpresa.toString(), fontBody);
-        dirParagraph.setAlignment(Element.ALIGN_CENTER);
-        doc.add(dirParagraph);
+        String datosEmpresa = infoEmpresa.toString().trim();
+        if (!datosEmpresa.isEmpty()) {
+            Paragraph dirParagraph = new Paragraph(datosEmpresa, fontBody);
+            dirParagraph.setAlignment(Element.ALIGN_CENTER);
+            doc.add(dirParagraph);
+        }
 
-        Paragraph avisoLegal = new Paragraph("\n*** COMPROBANTE DE VENTA ***\nNO VÁLIDO COMO BOLETA FISCAL\n\n", fontSubtitle);
+        Paragraph avisoLegal = new Paragraph("*** COMPROBANTE DE VENTA ***\nNO VÁLIDO COMO BOLETA FISCAL", fontSubtitle);
         avisoLegal.setAlignment(Element.ALIGN_CENTER);
+        avisoLegal.setSpacingBefore(3f);
+        avisoLegal.setSpacingAfter(3f);
         doc.add(avisoLegal);
 
         // --- DATOS OPERACIÓN ---
@@ -153,11 +170,13 @@ public class VoucherService {
         doc.add(totalPar);
 
         // --- PIE Y COPIA ---
-        Paragraph pieCopia = new Paragraph("\n--- " + tipoCopia + " ---", fontSubtitle);
-        pieCopia.setAlignment(Element.ALIGN_CENTER);
-        doc.add(pieCopia);
+        if (tipoCopia != null) {
+            Paragraph pieCopia = new Paragraph("\n--- " + tipoCopia + " ---", fontSubtitle);
+            pieCopia.setAlignment(Element.ALIGN_CENTER);
+            doc.add(pieCopia);
+        }
 
-        Paragraph gracias = new Paragraph("¡Gracias por su preferencia!\n", fontBody);
+        Paragraph gracias = new Paragraph("¡Gracias por su preferencia!", fontBody);
         gracias.setAlignment(Element.ALIGN_CENTER);
         doc.add(gracias);
     }
