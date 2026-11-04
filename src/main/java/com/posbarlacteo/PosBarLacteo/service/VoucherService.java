@@ -265,7 +265,7 @@ public class VoucherService {
             }
             if (detalle.getCantidad() != null) res.cantidad = detalle.getCantidad();
             if (detalle.getPrecioUnitario() != null) res.precioUnitario = detalle.getPrecioUnitario();
-            res.subtotal = res.cantidad * res.precioUnitario;
+            res.subtotal = Math.round(res.cantidad * res.precioUnitario);
         } 
         // 2. MAP (JSON)
         else if (item instanceof Map<?, ?> map) {
@@ -288,7 +288,7 @@ public class VoucherService {
 
             res.subtotal = buscarEnMapDouble(map, "subtotal", "total");
             if (res.subtotal <= 0 && res.precioUnitario > 0) {
-                res.subtotal = res.cantidad * res.precioUnitario;
+                res.subtotal = Math.round(res.cantidad * res.precioUnitario);
             }
         } 
         // 3. DTO Reflexión
@@ -315,7 +315,7 @@ public class VoucherService {
 
             double sub = buscarPropiedadDouble(item, "getSubtotal", "getTotal");
             if (sub > 0) res.subtotal = sub;
-            else if (res.precioUnitario > 0) res.subtotal = res.cantidad * res.precioUnitario;
+            else if (res.precioUnitario > 0) res.subtotal = Math.round(res.cantidad * res.precioUnitario);
         }
 
         // Búsqueda de respaldo en base de datos si falta la descripción

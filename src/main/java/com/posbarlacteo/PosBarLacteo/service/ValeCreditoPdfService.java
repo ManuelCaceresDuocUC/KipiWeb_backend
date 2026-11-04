@@ -88,7 +88,7 @@ public class ValeCreditoPdfService {
                 double cant = d.getCantidad() != null ? d.getCantidad() : 0;
                 String desc = d.getProducto() != null && d.getProducto().getDescripcion() != null
                         ? d.getProducto().getDescripcion() : "Producto";
-                doc.add(new Paragraph(cant(cant) + "x " + desc + " ($" + df.format(pu) + ") = $" + df.format(cant * pu), normal));
+                doc.add(new Paragraph(cant(cant) + "x " + desc + " ($" + df.format(pu) + ") = $" + df.format(Math.round(cant * pu)), normal));
             }
         }
         doc.add(new Paragraph("--------------------------------", normal));

@@ -41,6 +41,13 @@ public class Producto {
     @Column(name = "es_insumo")
     private Boolean esInsumo;
 
+    /**
+     * true = se vende por peso o medida (granel): en caja se digita la cantidad con decimales (p. ej. 0,350 kg).
+     * null/false = se vende por unidades enteras.
+     */
+    @Column(name = "pesable")
+    private Boolean pesable;
+
     @Column(nullable = false)
     private String descripcion;
 

@@ -102,6 +102,7 @@ public class ProductoController {
         producto.setStockCritico(body.getStockCritico());
         producto.setCategoria(resolverCategoria(body.getCategoria(), p.empresaId()));
         producto.setUnidadMedida(body.getUnidadMedida());
+        producto.setPesable(Boolean.TRUE.equals(body.getPesable()));
         if (body.getEsInsumo() != null) {
             producto.setEsInsumo(body.getEsInsumo());
         }
@@ -127,6 +128,7 @@ public class ProductoController {
         if (body.getCosto() != null) producto.setCosto(body.getCosto());
         if (body.getStockCritico() != null) producto.setStockCritico(body.getStockCritico());
         if (body.getUnidadMedida() != null) producto.setUnidadMedida(body.getUnidadMedida());
+        if (body.getPesable() != null) producto.setPesable(body.getPesable());
         if (body.getEsInsumo() != null) producto.setEsInsumo(body.getEsInsumo());
 
         // Se conserva el comportamiento anterior: enviar categoria null la quita
@@ -197,6 +199,7 @@ public class ProductoController {
         if (principal.getUnidadMedida() == null || principal.getUnidadMedida().isBlank()) {
             principal.setUnidadMedida("UN");
         }
+        principal.setPesable(Boolean.TRUE.equals(principal.getPesable()));
 
         // Validar TODOS los insumos antes de guardar nada
         if (request.getIngredientes() != null) {

@@ -155,11 +155,26 @@ public class VentaService {
 
         for (ItemVenta item : items) {
             if (item == null || item.getProductoId() == null || item.getCantidad() == null
-                    || item.getCantidad() <= 0 || Double.isNaN(item.getCantidad())) {
+                    || item.getCantidad() <= 0 || Double.isNaN(item.getCantidad()) || Double.isInfinite(item.getCantidad())
+                    || item.getCantidad() > 1_000_000d) {
                 throw new NegocioException("Hay un producto con cantidad inválida en el carrito.");
             }
             Producto producto = productoRepository.findByIdAndEmpresaId(item.getProductoId(), p.empresaId())
                     .orElseThrow(() -> new NegocioException("Producto no encontrado: " + item.getProductoId()));
+            // Granel: hasta 3 decimales (gramos). Producto por unidad: solo cantidades enteras.
+            final double cantidad;
+            if (Boolean.TRUE.equals(producto.getPesable())) {
+                cantidad = Math.round(item.getCantidad() * 1000d) / 1000d;
+                if (cantidad <= 0) {
+                    throw new NegocioException("La cantidad de \"" + producto.getDescripcion() + "\" es demasiado pequeña.");
+                }
+            } else {
+                if (Math.abs(item.getCantidad() - Math.rint(item.getCantidad())) > 1e-9) {
+                    throw new NegocioException("\"" + producto.getDescripcion() + "\" se vende por unidades enteras. "
+                            + "Para venderlo por peso, actívalo como \"se vende por peso\" en Inventario.");
+                }
+                cantidad = Math.rint(item.getCantidad());
+            }
             if (!diferida && !Boolean.TRUE.equals(producto.getActivo())) {
                 throw new NegocioException("El producto \"" + producto.getDescripcion() + "\" está desactivado.");
             }
@@ -170,19 +185,19 @@ public class VentaService {
             // Qué se consume realmente: el producto, o sus insumos si tiene receta
             List<Receta> ingredientes = recetaRepository.findByProductoPrincipalId(producto.getId());
             if (ingredientes.isEmpty()) {
-                consumo.merge(producto.getId(), item.getCantidad(), Double::sum);
+                consumo.merge(producto.getId(), cantidad, Double::sum);
                 nombres.put(producto.getId(), producto.getDescripcion());
             } else {
                 for (Receta receta : ingredientes) {
                     Producto insumo = receta.getInsumo();
-                    consumo.merge(insumo.getId(), receta.getCantidadUsada() * item.getCantidad(), Double::sum);
+                    consumo.merge(insumo.getId(), receta.getCantidadUsada() * cantidad, Double::sum);
                     nombres.put(insumo.getId(), insumo.getDescripcion());
                 }
             }
 
             VentaDetalle detalle = new VentaDetalle();
             detalle.setProducto(producto);
-            detalle.setCantidad(item.getCantidad());
+            detalle.setCantidad(cantidad);
             double precio = producto.getPrecio();
             if (diferida && item.getPrecioUnitario() != null) {
                 double local = item.getPrecioUnitario();
@@ -198,7 +213,8 @@ public class VentaService {
             detalle.setPrecioUnitario(precio);
             detalle.setVenta(venta);
             detalles.add(detalle);
-            total += precio * item.getCantidad();
+            // Cada línea se redondea a peso entero: así el total coincide con la suma de las líneas del ticket y de la boleta
+            total += Math.round(precio * cantidad);
         }
 
         long totalServidor = Math.round(total);
