@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -29,4 +30,21 @@ public interface ProductoRepository extends JpaRepository<Producto, Long> {
     // Agregamos EntityGraph aquí también para optimizar el filtro por categoría
     @EntityGraph(attributePaths = {"categoria", "empresa"})
     Page<Producto> findByActivoTrueAndCategoriaIdAndEmpresaId(Long categoriaId, Long empresaId, Pageable pageable);
+
+    /** Mayor código interno (EAN-13 que empieza con 29) de la empresa, o null si no tiene. */
+    @Query(value = "SELECT MAX(codigo_barras) FROM pos_productos WHERE empresa_id = :empresaId "
+                 + "AND codigo_barras REGEXP '^29[0-9]{11}$'", nativeQuery = true)
+    String maxCodigoInterno(@Param("empresaId") Long empresaId);
+
+    List<Producto> findByEmpresaIdAndActivoTrueAndDescripcionIgnoreCase(Long empresaId, String descripcion);
+
+    /** Productos activos sin código (y, si se pide, con código provisional PROV-...). */
+    @Query("SELECT p FROM Producto p WHERE p.empresa.id = :empresaId AND p.activo = true AND "
+         + "(p.codigoBarras IS NULL OR p.codigoBarras = '' OR (:incluirProv = true AND p.codigoBarras LIKE 'PROV-%')) "
+         + "ORDER BY p.id")
+    List<Producto> sinCodigo(@Param("empresaId") Long empresaId, @Param("incluirProv") boolean incluirProvisionales);
+
+    @EntityGraph(attributePaths = {"categoria"})
+    @Query("SELECT p FROM Producto p WHERE p.empresa.id = :empresaId AND p.activo = true ORDER BY p.descripcion")
+    List<Producto> catalogoCompleto(@Param("empresaId") Long empresaId);
 }

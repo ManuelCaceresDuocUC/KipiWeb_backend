@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.posbarlacteo.PosBarLacteo.dto.ImportarProductosRequest;
 import com.posbarlacteo.PosBarLacteo.dto.RecetaRequestDTO;
 import com.posbarlacteo.PosBarLacteo.exception.ConflictoException;
 import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
@@ -30,7 +31,9 @@ import com.posbarlacteo.PosBarLacteo.repository.ProductoRepository;
 import com.posbarlacteo.PosBarLacteo.repository.RecetaRepository;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.CodigoInternoService;
 import com.posbarlacteo.PosBarLacteo.service.InventarioService;
+import com.posbarlacteo.PosBarLacteo.service.ProductoImportService;
 
 /**
  * Catálogo por empresa. Lectura: cualquier usuario autenticado. Escritura: solo ADMIN (SecurityConfig).
@@ -47,15 +50,33 @@ public class ProductoController {
     private final CategoriaRepository categoriaRepository;
     private final EmpresaRepository empresaRepository;
     private final InventarioService inventarioService;
+    private final CodigoInternoService codigoInterno;
+    private final ProductoImportService importService;
 
     public ProductoController(ProductoRepository productoRepository, RecetaRepository recetaRepository,
                               CategoriaRepository categoriaRepository, EmpresaRepository empresaRepository,
-                              InventarioService inventarioService) {
+                              InventarioService inventarioService, CodigoInternoService codigoInterno,
+                              ProductoImportService importService) {
         this.productoRepository = productoRepository;
         this.recetaRepository = recetaRepository;
         this.categoriaRepository = categoriaRepository;
         this.empresaRepository = empresaRepository;
         this.inventarioService = inventarioService;
+        this.codigoInterno = codigoInterno;
+        this.importService = importService;
+    }
+
+    /** Carga masiva desde Excel/CSV (solo ADMIN). Con soloValidar=true devuelve la vista previa sin guardar. */
+    @PostMapping("/importar")
+    public java.util.Map<String, Object> importar(@RequestBody ImportarProductosRequest request) {
+        return importService.importar(SecurityUtils.actual(), request);
+    }
+
+    /** Asigna código interno (EAN-13) a los productos sin código. Body opcional: {"incluirProvisionales": true}. */
+    @PostMapping("/asignar-codigos")
+    public java.util.Map<String, Object> asignarCodigos(@RequestBody(required = false) java.util.Map<String, Object> body) {
+        boolean incluir = body != null && Boolean.TRUE.equals(body.get("incluirProvisionales"));
+        return importService.asignarCodigos(SecurityUtils.actual(), incluir);
     }
 
     /**
@@ -91,6 +112,7 @@ public class ProductoController {
         AuthPrincipal p = SecurityUtils.actual();
         Producto producto = buscar(id);
         String codigo = normalizarCodigo(body.getCodigoBarras());
+        if (codigo == null) codigo = codigoInterno.siguiente(p.empresaId()); // un producto siempre queda con código escaneable
         validarCodigoUnico(codigo, p.empresaId(), id);
         validarDatos(body);
 
@@ -153,6 +175,7 @@ public class ProductoController {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada."));
 
         String codigo = normalizarCodigo(body.getCodigoBarras());
+        if (codigo == null) codigo = codigoInterno.siguiente(p.empresaId()); // sin código: se le asigna uno interno
         validarCodigoUnico(codigo, p.empresaId(), null);
 
         body.setId(null);
@@ -185,6 +208,7 @@ public class ProductoController {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada."));
 
         String codigo = normalizarCodigo(principal.getCodigoBarras());
+        if (codigo == null) codigo = codigoInterno.siguiente(p.empresaId());
         validarCodigoUnico(codigo, p.empresaId(), null);
 
         principal.setId(null);

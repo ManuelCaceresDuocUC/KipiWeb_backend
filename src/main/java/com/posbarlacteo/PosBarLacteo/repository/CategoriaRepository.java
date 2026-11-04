@@ -15,4 +15,6 @@ public interface CategoriaRepository extends JpaRepository<Categoria, Long> {
 
     // ✨ NUEVO: Método que filtra por Empresa y que la categoría esté activa
     List<Categoria> findByEmpresaIdAndActivoTrue(Long empresaId);
+
+    Optional<Categoria> findFirstByEmpresaIdAndNombreIgnoreCase(Long empresaId, String nombre);
 }
