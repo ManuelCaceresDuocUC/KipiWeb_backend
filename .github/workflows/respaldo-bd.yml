@@ -36,18 +36,25 @@ jobs:
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           set -euo pipefail
+          # Limpia espacios/saltos de línea y valida host y puerto (errores típicos al pegar los secretos)
+          DB_HOST="$(printf '%s' "$DB_HOST" | tr -d '[:space:]')"; DB_HOST="${DB_HOST%%:*}"
+          DB_PORT="$(printf '%s' "$DB_PORT" | tr -d '[:space:]')"
+          if ! [[ "$DB_PORT" =~ ^[0-9]+$ ]]; then
+            echo "::error::DB_PORT debe ser solo el número (ej. 12345). Revisa el secreto."; exit 1
+          fi
           SELLO="$(date -u +%Y-%m-%d_%H%M)"
           echo "ARCHIVO=kipipos-${SELLO}.sql.gz.enc" >> "$GITHUB_ENV"
 
           mysqldump --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
-            --single-transaction --quick --routines --triggers --events --no-tablespaces \
+            --single-transaction --quick --set-gtid-purged=OFF --routines --triggers --events --no-tablespaces \
             "$DB_NAME" | gzip -9 > respaldo.sql.gz
 
           # Validaciones: que el archivo no esté vacío ni dañado y que realmente traiga tablas
           gzip -t respaldo.sql.gz
           test "$(stat -c %s respaldo.sql.gz)" -gt 2000
-          zcat respaldo.sql.gz | grep -q "CREATE TABLE"
-          echo "Tablas respaldadas: $(zcat respaldo.sql.gz | grep -c '^CREATE TABLE')"
+          TABLAS="$(zcat respaldo.sql.gz | grep -c '^CREATE TABLE' || true)"
+          if [ "${TABLAS:-0}" -lt 1 ]; then echo "::error::El respaldo no contiene tablas"; exit 1; fi
+          echo "Tablas respaldadas: $TABLAS"
 
           openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
             -in respaldo.sql.gz -out "kipipos-${SELLO}.sql.gz.enc" -pass env:BACKUP_PASSPHRASE
