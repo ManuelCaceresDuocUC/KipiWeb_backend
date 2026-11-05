@@ -1,0 +1,71 @@
+name: Respaldo diario de la base de datos
+
+# Copia completa de la base de KIPIPOS (Railway/MySQL), cifrada y guardada en tu almacén S3, fuera de Railway.
+# Se ejecuta cada noche y también a mano (pestaña Actions → "Respaldo diario…" → Run workflow).
+# Si falla, GitHub te avisa por correo. Guía completa: docs/RESPALDOS_BD.md
+
+on:
+  schedule:
+    - cron: '30 6 * * *'   # 06:30 UTC = 03:30 (verano) / 02:30 (invierno) en Chile
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: respaldo-bd
+  cancel-in-progress: false
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Instalar cliente de MySQL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mysql-client
+
+      - name: Crear, validar y cifrar el respaldo
+        env:
+          MYSQL_PWD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          SELLO="$(date -u +%Y-%m-%d_%H%M)"
+          echo "ARCHIVO=kipipos-${SELLO}.sql.gz.enc" >> "$GITHUB_ENV"
+
+          mysqldump --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" \
+            --single-transaction --quick --routines --triggers --events --no-tablespaces \
+            "$DB_NAME" | gzip -9 > respaldo.sql.gz
+
+          # Validaciones: que el archivo no esté vacío ni dañado y que realmente traiga tablas
+          gzip -t respaldo.sql.gz
+          test "$(stat -c %s respaldo.sql.gz)" -gt 2000
+          zcat respaldo.sql.gz | grep -q "CREATE TABLE"
+          echo "Tablas respaldadas: $(zcat respaldo.sql.gz | grep -c '^CREATE TABLE')"
+
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -in respaldo.sql.gz -out "kipipos-${SELLO}.sql.gz.enc" -pass env:BACKUP_PASSPHRASE
+          rm -f respaldo.sql.gz
+          ls -lh kipipos-*.enc
+
+      - name: Subir a S3 y comprobar
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [ -n "${S3_ENDPOINT:-}" ]; then EXTRA=(--endpoint-url "$S3_ENDPOINT"); fi
+          CLAVE="respaldos-bd/$(date -u +%Y)/${ARCHIVO}"
+          aws s3 cp "$ARCHIVO" "s3://${S3_BUCKET}/${CLAVE}" "${EXTRA[@]}" --only-show-errors
+          aws s3api head-object --bucket "$S3_BUCKET" --key "$CLAVE" "${EXTRA[@]}" > /dev/null
+          echo "Respaldo guardado: s3://${S3_BUCKET}/${CLAVE}"
