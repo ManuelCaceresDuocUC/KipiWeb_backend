@@ -71,7 +71,7 @@ public class CajaService {
      * el total esperado y la diferencia los calcula el servidor con lo acumulado en el turno.
      */
     @Transactional
-    public void cerrarCaja(AuthPrincipal p, CierreCajaDTO cierre) {
+    public Long cerrarCaja(AuthPrincipal p, CierreCajaDTO cierre) {
         validarMonto(cierre.getTotalRealFisico(), true, "El efectivo contado");
         TurnoCaja turno = turnoAbierto(p, "No hay ninguna caja abierta para cerrar.");
 
@@ -83,6 +83,7 @@ public class CajaService {
         turno.setTotalRealFisico(cierre.getTotalRealFisico());
         turno.setDiferencia(cierre.getTotalRealFisico().subtract(esperado));
         turnoCajaRepository.save(turno);
+        return turno.getId();
     }
 
     @Transactional

@@ -16,6 +16,7 @@ import com.posbarlacteo.PosBarLacteo.dto.ResumenCajaDTO;
 import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
 import com.posbarlacteo.PosBarLacteo.service.CajaService;
+import com.posbarlacteo.PosBarLacteo.service.CierreCajaCorreoService;
 
 /**
  * La caja siempre es la del usuario del token. El parámetro ?usuarioId que aún envíe el frontend
@@ -26,9 +27,11 @@ import com.posbarlacteo.PosBarLacteo.service.CajaService;
 public class CajaController {
 
     private final CajaService cajaService;
+    private final CierreCajaCorreoService cierreCorreo;
 
-    public CajaController(CajaService cajaService) {
+    public CajaController(CajaService cajaService, CierreCajaCorreoService cierreCorreo) {
         this.cajaService = cajaService;
+        this.cierreCorreo = cierreCorreo;
     }
 
     @GetMapping("/estado")
@@ -49,7 +52,8 @@ public class CajaController {
     @PostMapping("/cerrar")
     public ResponseEntity<?> cerrarCaja(@RequestBody CierreCajaDTO dto) {
         try {
-            cajaService.cerrarCaja(SecurityUtils.actual(), dto);
+            Long turnoId = cajaService.cerrarCaja(SecurityUtils.actual(), dto);
+            cierreCorreo.enviarAsync(turnoId); // el cierre ya está guardado; el correo nunca lo retrasa ni lo rompe
             return ResponseEntity.ok().build();
         } catch (NegocioException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -87,6 +91,17 @@ public class CajaController {
     public ResponseEntity<?> movimientosTurnoActual() {
         try {
             return ResponseEntity.ok(cajaService.movimientosTurnoActual(SecurityUtils.actual()));
+        } catch (NegocioException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /** Solo ADMIN (ver SecurityConfig): reenvía a su propio correo el resumen de un cierre. */
+    @PostMapping("/historial/{turnoId}/reenviar-correo")
+    public ResponseEntity<?> reenviarCierre(@PathVariable Long turnoId) {
+        try {
+            String destino = cierreCorreo.reenviar(SecurityUtils.actual(), turnoId);
+            return ResponseEntity.ok(java.util.Map.of("destino", destino));
         } catch (NegocioException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }

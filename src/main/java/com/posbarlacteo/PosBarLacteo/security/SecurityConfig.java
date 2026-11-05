@@ -64,6 +64,7 @@ public class SecurityConfig {
                 // 3. Solo administradores
                 .requestMatchers("/api/admin/**", "/api/dte/**", "/api/inventario/**", "/api/reportes/**", "/api/exportar/**", "/api/proveedores/**", "/api/compras/**", "/api/sugerencias/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/caja/historial", "/api/caja/historial/**", "/api/usuarios").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/caja/historial/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/ventas/*/anular", "/api/ventas/*/nota-credito/reintentar").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/ventas/*/nota-credito").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/empresa/**", "/api/usuarios/**").hasRole("ADMIN")
