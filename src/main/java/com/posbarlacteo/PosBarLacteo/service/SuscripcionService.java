@@ -135,6 +135,10 @@ public class SuscripcionService {
             return new Vista(BAJA, Modo.DENEGADO, null, null, null, false,
                     "Tu cuenta fue dada de baja. Si fue un error, escríbenos antes de que se eliminen tus datos.");
         }
+        if (e.isBloqueoManual()) {
+            return new Vista(SUSPENDIDA, Modo.SOLO_LECTURA, e.getMoraDesde(), limiteGracia, e.getAccesoHasta(), cancelada,
+                    "Tu cuenta fue suspendida por el equipo de KIPIPOS: puedes consultar tu información, pero no registrar ventas ni cambios. Escríbenos para regularizarla.");
+        }
         if (PRUEBA.equals(estado)) {
             LocalDateTime hasta = e.getPruebaHasta();
             if (hasta == null || ahora.isAfter(hasta)) {

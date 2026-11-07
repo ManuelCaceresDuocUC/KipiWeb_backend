@@ -3,6 +3,9 @@ package com.posbarlacteo.PosBarLacteo.service;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +26,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
@@ -157,6 +162,26 @@ public class ComprobanteService {
     }
 
     // ------------------------------------------------------------------------------------------
+
+    public record Objeto(String key, long bytes, java.time.Instant fecha) { }
+
+    /** Lista los objetos bajo un prefijo, del más reciente al más antiguo (máx. {@code max}). Requiere permiso s3:ListBucket. */
+    public List<Objeto> listar(String prefijo, int max) {
+        exigirHabilitado();
+        List<Objeto> todos = new ArrayList<>();
+        String token = null;
+        do {
+            ListObjectsV2Request.Builder rb = ListObjectsV2Request.builder().bucket(bucket).prefix(prefijo);
+            if (token != null) {
+                rb.continuationToken(token);
+            }
+            ListObjectsV2Response r = cliente().listObjectsV2(rb.build());
+            r.contents().forEach(o -> todos.add(new Objeto(o.key(), o.size() == null ? 0 : o.size(), o.lastModified())));
+            token = Boolean.TRUE.equals(r.isTruncated()) ? r.nextContinuationToken() : null;
+        } while (token != null && todos.size() < 5000);
+        todos.sort(Comparator.comparing(Objeto::fecha).reversed());
+        return todos.size() > max ? new ArrayList<>(todos.subList(0, max)) : todos;
+    }
 
     private void exigirHabilitado() {
         if (!habilitado()) {

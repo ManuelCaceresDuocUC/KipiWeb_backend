@@ -250,6 +250,33 @@ public class Empresa {
     @Column(name = "flow_morosidad")
     private Integer flowMorosidad;
 
+    // ---- Bloqueo manual desde el panel del dueño (no lo toca la conciliación con Flow) ----
+
+    /** true = el dueño de KIPIPOS dejó la cuenta en solo lectura. Independiente del estado de Flow. */
+    @JsonIgnore
+    @Column(name = "bloqueo_manual")
+    private Boolean bloqueoManual;
+
+    @JsonIgnore
+    @Column(name = "bloqueo_motivo", length = 300)
+    private String bloqueoMotivo;
+
+    @JsonIgnore
+    @Column(name = "bloqueo_desde")
+    private LocalDateTime bloqueoDesde;
+
+    public boolean isBloqueoManual() { return Boolean.TRUE.equals(bloqueoManual); }
+
+    public String getBloqueoMotivo() { return bloqueoMotivo; }
+
+    public LocalDateTime getBloqueoDesde() { return bloqueoDesde; }
+
+    public void setBloqueoManual(boolean bloqueado, String motivo) {
+        this.bloqueoManual = bloqueado;
+        this.bloqueoMotivo = bloqueado ? motivo : null;
+        this.bloqueoDesde = bloqueado ? LocalDateTime.now() : null;
+    }
+
     // ---- Prueba gratuita sin tarjeta y baja de la cuenta (ver SuscripcionService y BajaCuentaService) ----
 
     /** Fin de la prueba gratuita; solo aplica mientras estado = PRUEBA. */
