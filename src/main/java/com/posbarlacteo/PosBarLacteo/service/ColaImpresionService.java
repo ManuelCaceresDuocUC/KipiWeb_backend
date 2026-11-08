@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.stereotype.Service;
 
@@ -37,13 +38,20 @@ public class ColaImpresionService {
 
     private final Map<String, Deque<Trabajo>> colas = new ConcurrentHashMap<>();
     private final Map<String, Long> latidos = new ConcurrentHashMap<>();
+    private final Map<String, Object> monitores = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> esperando = new ConcurrentHashMap<>();
 
     private static String clave(AuthPrincipal p) {
         return p.empresaId() + ":" + (p.sucursalId() == null ? 0 : p.sucursalId());
     }
 
     public boolean estacionConectada(AuthPrincipal p) {
-        Long t = latidos.get(clave(p));
+        String k = clave(p);
+        AtomicInteger e = esperando.get(k);
+        if (e != null && e.get() > 0) {
+            return true; // la estación tiene una consulta abierta esperando trabajos
+        }
+        Long t = latidos.get(k);
         return t != null && System.currentTimeMillis() - t < LATIDO_MS;
     }
 
@@ -84,13 +92,51 @@ public class ColaImpresionService {
             }
             cola.addLast(t);
         }
+        Object mon = monitores.computeIfAbsent(clave(p), k -> new Object());
+        synchronized (mon) {
+            mon.notifyAll(); // despierta a la estación que está esperando
+        }
         return t;
     }
 
-    /** La estación consulta: se registra el latido y se le entregan (y retiran) los trabajos vigentes. */
-    public List<Trabajo> reclamar(AuthPrincipal p) {
+    /**
+     * La estación consulta: se registra el latido y se le entregan (y retiran) los trabajos vigentes.
+     * Con {@code esperaMs} > 0 la consulta se queda abierta hasta que llegue un trabajo (o pase el tiempo), así el ticket
+     * sale casi al instante sin consultar a cada rato.
+     */
+    public List<Trabajo> reclamar(AuthPrincipal p, long esperaMs) {
         String k = clave(p);
+        Object mon = monitores.computeIfAbsent(k, x -> new Object());
+        AtomicInteger espera = esperando.computeIfAbsent(k, x -> new AtomicInteger());
         latidos.put(k, System.currentTimeMillis());
+        espera.incrementAndGet();
+        try {
+            long fin = System.currentTimeMillis() + Math.max(0, esperaMs);
+            synchronized (mon) {
+                while (true) {
+                    List<Trabajo> listos = sacar(k);
+                    if (!listos.isEmpty() || esperaMs <= 0) {
+                        return listos;
+                    }
+                    long resto = fin - System.currentTimeMillis();
+                    if (resto <= 0) {
+                        return List.of();
+                    }
+                    try {
+                        mon.wait(resto);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return List.of();
+                    }
+                }
+            }
+        } finally {
+            espera.decrementAndGet();
+            latidos.put(k, System.currentTimeMillis());
+        }
+    }
+
+    private List<Trabajo> sacar(String k) {
         Deque<Trabajo> cola = colas.get(k);
         if (cola == null) {
             return List.of();

@@ -18,7 +18,9 @@ public final class PdfTicketUtil {
     public static final float ANCHO = 226f;
     private static final float ALTO_MAXIMO = 14400f; // límite práctico de página PDF
     private static final float MARGEN_LATERAL = 8f;
-    private static final float MARGEN_VERTICAL = 10f;
+    private static final float MARGEN_SUPERIOR = 10f;
+    /** Los drivers de impresoras térmicas suelen reservar un margen inferior: sin este espacio, la última línea pasa a una 2.ª hoja. */
+    private static final float MARGEN_INFERIOR = 34f;
 
     @FunctionalInterface
     public interface Contenido {
@@ -40,20 +42,20 @@ public final class PdfTicketUtil {
     private static float medir(Contenido contenido) throws Exception {
         ByteArrayOutputStream descarte = new ByteArrayOutputStream();
         Document doc = new Document(new Rectangle(ANCHO, ALTO_MAXIMO), MARGEN_LATERAL, MARGEN_LATERAL,
-                MARGEN_VERTICAL, MARGEN_VERTICAL);
+                MARGEN_SUPERIOR, MARGEN_INFERIOR);
         PdfWriter writer = PdfWriter.getInstance(doc, descarte);
         doc.open();
         contenido.escribir(doc);
         float yFinal = writer.getVerticalPosition(true); // posición medida desde abajo de la página
         doc.close();
-        float usado = (ALTO_MAXIMO - yFinal) + MARGEN_VERTICAL;
-        return Math.min(ALTO_MAXIMO, Math.max(120f, usado + 6f));
+        float usado = (ALTO_MAXIMO - yFinal) + MARGEN_INFERIOR;
+        return Math.min(ALTO_MAXIMO, Math.max(120f, usado + 2f));
     }
 
     private static byte[] render(Contenido contenido, float alto) throws Exception {
         ByteArrayOutputStream salida = new ByteArrayOutputStream();
         Document doc = new Document(new Rectangle(ANCHO, alto), MARGEN_LATERAL, MARGEN_LATERAL,
-                MARGEN_VERTICAL, MARGEN_VERTICAL);
+                MARGEN_SUPERIOR, MARGEN_INFERIOR);
         PdfWriter.getInstance(doc, salida);
         doc.open();
         contenido.escribir(doc);

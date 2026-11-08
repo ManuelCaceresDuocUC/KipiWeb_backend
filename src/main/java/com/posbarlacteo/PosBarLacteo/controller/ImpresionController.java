@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
@@ -33,8 +34,9 @@ public class ImpresionController {
 
     /** Lo llama la estación de impresión cada pocos segundos: sirve de latido y entrega los trabajos pendientes. */
     @GetMapping("/pendientes")
-    public List<ColaImpresionService.Trabajo> pendientes() {
-        return cola.reclamar(SecurityUtils.actual());
+    public List<ColaImpresionService.Trabajo> pendientes(@RequestParam(defaultValue = "0") int espera) {
+        // espera (segundos, máx. 15): la consulta queda abierta hasta que llegue un trabajo
+        return cola.reclamar(SecurityUtils.actual(), Math.min(Math.max(espera, 0), 15) * 1000L);
     }
 
     @PostMapping("/trabajos")

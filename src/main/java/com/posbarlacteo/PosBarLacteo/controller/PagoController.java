@@ -32,6 +32,8 @@ import com.posbarlacteo.PosBarLacteo.service.VentaService;
 @RequestMapping("/api/pagos")
 public class PagoController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PagoController.class);
+
     private final VentaService ventaService;
     private final DteService dteService;
     private final ValeCreditoPdfService valeService;
@@ -92,6 +94,7 @@ public class PagoController {
             return respuestaDuplicada(previa.get());
         }
 
+        long t0 = System.nanoTime();
         Venta venta;
         try {
             venta = ventaService.procesarVenta(request, p);
@@ -105,7 +108,11 @@ public class PagoController {
         }
 
         Set<String> metodos = venta.getPagos().stream().map(PagoVenta::getMetodo).collect(Collectors.toSet());
+        long t1 = System.nanoTime();
         DteService.Emision doc = dteService.documentoDeVenta(venta, request, metodos, p);
+        long t2 = System.nanoTime();
+        log.info("Tiempos de la venta {}: registro {} ms, boleta/ticket {} ms (estado {})",
+                venta.getId(), (t1 - t0) / 1_000_000, (t2 - t1) / 1_000_000, doc.estado());
 
         Map<String, Object> cuerpo = new LinkedHashMap<>();
         cuerpo.put("status", "success");
