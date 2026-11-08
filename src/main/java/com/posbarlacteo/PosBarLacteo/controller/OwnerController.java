@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.posbarlacteo.PosBarLacteo.service.ErroresRecientes;
 import com.posbarlacteo.PosBarLacteo.service.OwnerPanelService;
+import com.posbarlacteo.PosBarLacteo.service.SaludServidorService;
 
 /** API del panel del dueño de KIPIPOS. Protegida por OWNER_API_TOKEN (ver OwnerSecurityConfig). */
 @RestController
@@ -20,9 +21,17 @@ import com.posbarlacteo.PosBarLacteo.service.OwnerPanelService;
 public class OwnerController {
 
     private final OwnerPanelService panel;
+    private final SaludServidorService salud;
 
-    public OwnerController(OwnerPanelService panel) {
+    public OwnerController(OwnerPanelService panel, SaludServidorService salud) {
         this.panel = panel;
+        this.salud = salud;
+    }
+
+    /** Estado en vivo del servidor: liviano, pensado para consultarse cada ~20 s. */
+    @GetMapping("/salud")
+    public Map<String, Object> salud() {
+        return salud.estado();
     }
 
     @GetMapping("/resumen")

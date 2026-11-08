@@ -80,6 +80,11 @@ public class ErroresRecientes {
         return out;
     }
 
+    public long ultimosMinutos(String nivel, int minutos) {
+        Instant desde = Instant.now().minusSeconds(60L * minutos);
+        return buffer.stream().filter(e -> e.fecha().isAfter(desde) && e.nivel().equalsIgnoreCase(nivel)).count();
+    }
+
     public long ultimas24h(String nivel) {
         Instant desde = Instant.now().minusSeconds(86_400);
         return buffer.stream().filter(e -> e.fecha().isAfter(desde) && e.nivel().equalsIgnoreCase(nivel)).count();

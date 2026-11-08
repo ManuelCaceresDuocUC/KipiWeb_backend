@@ -18,6 +18,7 @@ se autentica con un token secreto único (`OWNER_API_TOKEN`). Sin esa variable, 
 | `POST /empresas/{id}/suspender` `{motivo}` | Deja la cuenta en **solo lectura** (bloqueo manual) |
 | `POST /empresas/{id}/reactivar` | Quita el bloqueo manual |
 | `POST /empresas/{id}/sincronizar` | Consulta Flow y actualiza el estado ahora |
+| `GET /salud` | Estado en vivo (JVM, base de datos, pool, errores, Flow, S3, correo) y lista de problemas con código estable |
 | `GET /respaldos` | Lista `respaldos-bd/` en S3 y avisa si el último tiene más de 36 h |
 | `GET /errores?nivel=` | Últimos 300 avisos/errores del servidor (en memoria; se pierden al reiniciar) |
 
@@ -35,3 +36,21 @@ Si falta, el panel muestra el aviso "falta el permiso s3:ListBucket" en la pesta
 - `security/OwnerSecurityConfig.java`, `security/OwnerTokenFilter.java` (cadena de seguridad propia, antes de la general)
 - `controller/OwnerController.java`, `service/OwnerPanelService.java`, `service/ErroresRecientes.java`
 - Cambios: `Empresa` (bloqueo manual), `SuscripcionService.calcular`, `ComprobanteService.listar`, `JwtAuthFilter`, `application.properties`
+
+## 6. Estado en vivo y avisos
+La app consulta `/salud` cada 20 s (desde su proceso principal, aunque la ventana esté cerrada) y avisa con una notificación de escritorio
+cuando aparece un problema, cuando persiste un problema crítico (recordatorio cada 30 min) y cuando se resuelve.
+
+| Código | Nivel | Cuándo |
+|---|---|---|
+| `SERVIDOR_CAIDO` | Crítico | 2 consultas seguidas sin respuesta (lo detecta la app) |
+| `BD_CAIDA` / `BD_LENTA` | Crítico / Aviso | `select 1` falla / tarda ≥ 1,5 s |
+| `POOL_SATURADO` | Aviso | consultas esperando conexión a la base |
+| `MEMORIA_ALTA` / `CPU_ALTA` | Aviso | ≥ 85 % de heap / ≥ 90 % de CPU |
+| `ERRORES_PICO` | Aviso | ≥ 5 errores en 5 min |
+| `FLOW_FALLA` | Crítico | no responde `plans/get` (revisión cada 5 min en segundo plano) |
+| `S3_FALLA` / `RESPALDO_ATRASADO` | Aviso / Crítico | S3 inaccesible / último respaldo con más de 36 h |
+| `RESPUESTA_LENTA` | Aviso | la API tarda ≥ 4 s (lo mide la app) |
+
+Límites: solo avisa mientras la app esté corriendo en tu PC (apagado el PC, no hay avisos). Los umbrales están como constantes en
+`SaludServidorService.java`. Nota: al consultar cada 20 s, un servidor de Render con "sleep por inactividad" no llega a dormirse.
