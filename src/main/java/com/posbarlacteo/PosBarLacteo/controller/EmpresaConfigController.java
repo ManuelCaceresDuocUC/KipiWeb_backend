@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -49,17 +50,10 @@ public class EmpresaConfigController {
         AuthPrincipal p = SecurityUtils.actual();
         Empresa e = empresa(p);
 
-        String razon = limpiar(body.get("razonSocial"));
-        if (razon.length() < 2) {
-            throw new NegocioException("La razón social o nombre del negocio es obligatorio.");
-        }
-        validarLargo("La razón social", razon, 150);
-        String giro = limpiar(body.get("giro"));
-        validarLargo("El giro", giro, 80);
-        String direccion = limpiar(body.get("direccion"));
-        validarLargo("La dirección", direccion, 100);
-        String comuna = limpiar(body.get("comuna"));
-        validarLargo("La comuna", comuna, 60);
+        String razon = Validaciones.texto("La razón social o nombre del negocio", limpiar(body.get("razonSocial")), 2, 150, true);
+        String giro = nz(Validaciones.texto("El giro", limpiar(body.get("giro")), 2, 80, false));
+        String direccion = nz(Validaciones.texto("La dirección", limpiar(body.get("direccion")), 3, 100, false));
+        String comuna = nz(Validaciones.nombrePropio("La comuna", limpiar(body.get("comuna")), 2, 60, false));
 
         StringBuilder cambios = new StringBuilder();
         cambios.append(diferencia("razón social", e.getRazonSocial(), razon));
@@ -91,6 +85,10 @@ public class EmpresaConfigController {
 
     private static String limpiar(Object v) {
         return v == null ? "" : v.toString().replaceAll("[\\p{Cntrl}]", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    private static String nz(String v) {
+        return v == null ? "" : v;
     }
 
     private static void validarLargo(String campo, String valor, int max) {

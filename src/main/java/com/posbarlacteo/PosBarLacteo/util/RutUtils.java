@@ -18,6 +18,17 @@ public final class RutUtils {
         return limpio.substring(0, limpio.length() - 1) + "-" + limpio.charAt(limpio.length() - 1);
     }
 
+    /** "12.345.678-5": formato con puntos (el que guardan los clientes), o null si el formato es inválido. */
+    public static String formatear(String rut) {
+        String n = normalizar(rut);
+        if (n == null) {
+            return null;
+        }
+        String cuerpo = n.substring(0, n.length() - 2);
+        String conPuntos = new StringBuilder(cuerpo).reverse().toString().replaceAll("(\\d{3})(?=\\d)", "$1.");
+        return new StringBuilder(conPuntos).reverse() + "-" + n.charAt(n.length() - 1);
+    }
+
     public static boolean esValido(String rut) {
         String n = normalizar(rut);
         if (n == null) {

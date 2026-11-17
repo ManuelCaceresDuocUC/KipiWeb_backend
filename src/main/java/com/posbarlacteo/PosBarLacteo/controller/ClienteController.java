@@ -1,5 +1,7 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
+import com.posbarlacteo.PosBarLacteo.util.RutUtils;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -79,30 +81,25 @@ public class ClienteController {
     public ResponseEntity<?> crearCliente(@RequestBody Cliente body) {
         AuthPrincipal p = SecurityUtils.actual();
 
-        if (body.getNombre() == null || body.getNombre().isBlank()) {
-            throw new NegocioException("El nombre es obligatorio.");
-        }
-        if (body.getRut() == null || body.getRut().isBlank()) {
-            throw new NegocioException("El RUT es obligatorio.");
-        }
-        String rut = body.getRut().trim();
-        if (clienteRepository.findByRutAndEmpresaId(rut, p.empresaId()).isPresent()) {
+        String nombre = Validaciones.nombrePropio("El nombre", body.getNombre(), 2, 100, true);
+        String rut = Validaciones.rut("El RUT del cliente", body.getRut(), true); // "12.345.678-5", igual que el resto de los clientes
+        String telefono = Validaciones.telefono("El teléfono", body.getTelefono(), false);
+        String email = Validaciones.correo("El correo del cliente", body.getEmail(), false);
+        if (clienteRepository.findByRutAndEmpresaId(rut, p.empresaId()).isPresent()
+                || clienteRepository.findByRutAndEmpresaId(RutUtils.normalizar(rut), p.empresaId()).isPresent()) {
             throw new ConflictoException("Ya existe un cliente con ese RUT.");
         }
-        double limite = body.getLimiteCredito() != null ? body.getLimiteCredito() : 0.0;
-        if (limite < 0 || Double.isNaN(limite)) {
-            throw new NegocioException("El límite de crédito no es válido.");
-        }
+        double limite = Validaciones.dinero("El límite de crédito", body.getLimiteCredito(), false);
 
         Empresa empresa = empresaRepository.findById(p.empresaId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Empresa no encontrada."));
 
         Cliente nuevo = new Cliente();           // se copian solo campos permitidos (nada de id/deuda desde el cliente)
         nuevo.setEmpresa(empresa);
-        nuevo.setNombre(body.getNombre().trim());
+        nuevo.setNombre(nombre);
         nuevo.setRut(rut);
-        nuevo.setTelefono(body.getTelefono());
-        nuevo.setEmail(body.getEmail());
+        nuevo.setTelefono(telefono);
+        nuevo.setEmail(email);
         nuevo.setLimiteCredito(limite);
         nuevo.setDeudaActual(0.0);
         return ResponseEntity.ok(clienteRepository.save(nuevo));

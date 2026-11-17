@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.service;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -33,11 +34,7 @@ public class MailService {
     }
 
     public static String validarDestino(String email) {
-        String e = email == null ? "" : email.trim();
-        if (!EMAIL.matcher(e).matches() || e.length() > 150) {
-            throw new NegocioException("El correo ingresado no es válido.");
-        }
-        return e;
+        return Validaciones.correo("El correo ingresado", email, true);
     }
 
     public void enviarConAdjunto(String destino, String nombreRemitente, String asunto, String mensaje,

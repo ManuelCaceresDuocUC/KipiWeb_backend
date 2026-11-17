@@ -27,6 +27,7 @@ import com.posbarlacteo.PosBarLacteo.exception.NegocioException;
 import com.posbarlacteo.PosBarLacteo.exception.ServicioExternoException;
 import com.posbarlacteo.PosBarLacteo.security.Roles;
 import com.posbarlacteo.PosBarLacteo.util.RutUtils;
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import com.posbarlacteo.PosBarLacteo.model.Empresa;
 import com.posbarlacteo.PosBarLacteo.model.Sucursal;
 import com.posbarlacteo.PosBarLacteo.model.Usuario;
@@ -252,11 +253,11 @@ public class RegistroController {
         var emp = data.getEmpresa();
         var admin = data.getAdmin();
 
-        if (emp.getRazon_social() == null || emp.getRazon_social().isBlank()) {
-            throw new NegocioException("La razón social es obligatoria.");
-        }
+        // Se corrige lo corregible (espacios, mayúsculas del correo) y se rechaza el resto
+        emp.setRazon_social(Validaciones.texto("La razón social", emp.getRazon_social(), 2, 150, true));
+        emp.setGiro(Validaciones.texto("El giro", emp.getGiro(), 2, 80, false));
         if (!RutUtils.esValido(emp.getRut_empresa())) {
-            throw new NegocioException("El RUT de la empresa no es válido.");
+            throw new NegocioException("El RUT de la empresa no es válido. Revisa los números y el dígito verificador.");
         }
         String rut = RutUtils.normalizar(emp.getRut_empresa());
         if (empresaRepository.findByRutEmpresa(rut).isPresent()) {
@@ -266,20 +267,19 @@ public class RegistroController {
             }
             throw new ConflictoException("Ya existe una empresa registrada con ese RUT. Si ya tienes cuenta, inicia sesión.");
         }
-        if (admin.getCorreo() == null || !admin.getCorreo().matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
-            throw new NegocioException("El correo del administrador no es válido.");
-        }
-        validarCredenciales(admin.getUsuario(), admin.getContrasena());
+        admin.setCorreo(Validaciones.correo("El correo del administrador", admin.getCorreo(), true));
+        admin.setUsuario(Validaciones.usuario(admin.getUsuario()));
+        admin.setContrasena(Validaciones.contrasena(admin.getContrasena()));
 
         if (data.getSucursales() == null || data.getSucursales().isEmpty()) {
             throw new NegocioException("Debes registrar al menos una sucursal.");
         }
         Set<String> sucursales = new HashSet<>();
         for (var suc : data.getSucursales()) {
-            if (suc.getNombre() == null || suc.getNombre().isBlank()) {
-                throw new NegocioException("Todas las sucursales deben tener nombre.");
-            }
-            if (!sucursales.add(suc.getNombre())) {
+            suc.setNombre(Validaciones.nombrePropio("El nombre de la sucursal", suc.getNombre(), 2, 80, true));
+            suc.setDireccion(Validaciones.texto("La dirección de la sucursal", suc.getDireccion(), 3, 100, false));
+            suc.setComuna(Validaciones.nombrePropio("La comuna", suc.getComuna(), 2, 60, false));
+            if (!sucursales.add(suc.getNombre().toLowerCase())) {
                 throw new NegocioException("Hay sucursales con el mismo nombre: " + suc.getNombre());
             }
         }
@@ -291,9 +291,15 @@ public class RegistroController {
             throw new ConflictoException("El nombre de usuario \"" + admin.getUsuario().trim() + "\" ya está en uso.");
         }
         if (data.getEmpleados() != null) {
+            if (data.getEmpleados().size() > 50) {
+                throw new NegocioException("Puedes registrar hasta 50 usuarios adicionales; el resto se agrega después desde Equipo.");
+            }
             for (var e : data.getEmpleados()) {
-                validarCredenciales(e.getUsuario(), e.getContrasena());
-                String nombre = e.getUsuario().trim();
+                e.setUsuario(Validaciones.usuario(e.getUsuario()));
+                e.setContrasena(Validaciones.contrasena(e.getContrasena()));
+                e.setCorreo(Validaciones.correo("El correo del usuario \"" + e.getUsuario() + "\"", e.getCorreo(), false));
+                e.setSucursalNombre(Validaciones.nombrePropio("La sucursal del usuario", e.getSucursalNombre(), 2, 80, false));
+                String nombre = e.getUsuario();
                 if (!usuarios.add(nombre.toLowerCase()) || usuarioRepository.existsByUsuario(nombre)) {
                     throw new ConflictoException("El nombre de usuario \"" + nombre + "\" ya está en uso.");
                 }
@@ -301,14 +307,6 @@ public class RegistroController {
         }
     }
 
-    private void validarCredenciales(String usuario, String contrasena) {
-        if (usuario == null || usuario.trim().length() < 3) {
-            throw new NegocioException("El nombre de usuario debe tener al menos 3 caracteres.");
-        }
-        if (contrasena == null || contrasena.length() < 8) {
-            throw new NegocioException("La contraseña debe tener al menos 8 caracteres.");
-        }
-    }
 
     // ------------------------------------------------------------------
     // RETORNO DESDE FLOW
