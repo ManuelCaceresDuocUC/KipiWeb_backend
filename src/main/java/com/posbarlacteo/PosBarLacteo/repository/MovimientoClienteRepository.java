@@ -15,6 +15,10 @@ public interface MovimientoClienteRepository extends JpaRepository<MovimientoCli
     @Query("SELECT m FROM MovimientoCliente m WHERE m.id = :id AND m.empresa.id = :empresaId")
     java.util.Optional<MovimientoCliente> buscarDeEmpresa(@Param("id") Long id, @Param("empresaId") Long empresaId);
 
+    /** Todos los movimientos del cliente, del más antiguo al más reciente (para exportar sus datos). */
+    @Query("SELECT m FROM MovimientoCliente m WHERE m.cliente.id = :clienteId AND m.empresa.id = :empresaId ORDER BY m.id ASC")
+    java.util.List<MovimientoCliente> todosDelCliente(@Param("clienteId") Long clienteId, @Param("empresaId") Long empresaId);
+
     @Query("SELECT m FROM MovimientoCliente m WHERE m.cliente.id = :clienteId AND m.empresa.id = :empresaId ORDER BY m.id DESC")
     Page<MovimientoCliente> porCliente(@Param("clienteId") Long clienteId,
                                        @Param("empresaId") Long empresaId, Pageable pageable);

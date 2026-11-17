@@ -72,6 +72,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/usuarios").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PATCH, "/api/usuarios/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PATCH, "/api/clientes/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/clientes/*/exportar").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/clientes/*/anonimizar").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/clientes/reiniciar-creditos").hasRole("ADMIN")
                 // Catálogo: lectura para todos; alta/edición/baja solo administrador
                 .requestMatchers(HttpMethod.POST, "/api/productos/**", "/api/categorias/**", "/api/recetas/**").hasRole("ADMIN")

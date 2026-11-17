@@ -30,6 +30,7 @@ import com.posbarlacteo.PosBarLacteo.repository.EmpresaRepository;
 import com.posbarlacteo.PosBarLacteo.repository.MovimientoClienteRepository;
 import com.posbarlacteo.PosBarLacteo.security.AuthPrincipal;
 import com.posbarlacteo.PosBarLacteo.security.SecurityUtils;
+import com.posbarlacteo.PosBarLacteo.service.AuditoriaService;
 import com.posbarlacteo.PosBarLacteo.service.CajaService;
 import com.posbarlacteo.PosBarLacteo.service.CuentaClienteService;
 import com.posbarlacteo.PosBarLacteo.service.DteService;
@@ -52,13 +53,15 @@ public class ClienteController {
     private final MailService mailService;
     private final DteService dteService;
     private final TransactionTemplate transaccion;
+    private final AuditoriaService auditoria;
 
     public ClienteController(ClienteRepository clienteRepository, EmpresaRepository empresaRepository,
                              CajaService cajaService, ValeCreditoPdfService valeCreditoPdfService,
                              CuentaClienteService cuentaClienteService,
                              MovimientoClienteRepository movimientoClienteRepository,
                              EstadoCuentaPdfService estadoCuentaPdfService, MailService mailService,
-                             DteService dteService, TransactionTemplate transaccion) {
+                             DteService dteService, TransactionTemplate transaccion,
+                             AuditoriaService auditoria) {
         this.clienteRepository = clienteRepository;
         this.empresaRepository = empresaRepository;
         this.cajaService = cajaService;
@@ -69,6 +72,7 @@ public class ClienteController {
         this.mailService = mailService;
         this.dteService = dteService;
         this.transaccion = transaccion;
+        this.auditoria = auditoria;
     }
 
     @PostMapping
@@ -277,6 +281,73 @@ public class ClienteController {
         r.put("totalPages", pagina.getTotalPages());
         r.put("totalElements", pagina.getTotalElements());
         return r;
+    }
+
+    /**
+     * Derecho de acceso y portabilidad (Ley 21.719): entrega todos los datos que KIPI guarda de un cliente final,
+     * para que el comercio (responsable) se los pueda entregar a la persona. Solo ADMIN (ver SecurityConfig).
+     */
+    @GetMapping("/{id}/exportar")
+    @Transactional(readOnly = true)
+    public Map<String, Object> exportarDatos(@PathVariable Long id) {
+        AuthPrincipal p = SecurityUtils.actual();
+        Cliente c = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
+
+        Map<String, Object> datos = new LinkedHashMap<>();
+        datos.put("id", c.getId());
+        datos.put("nombre", c.getNombre());
+        datos.put("rut", c.getRut());
+        datos.put("telefono", c.getTelefono());
+        datos.put("email", c.getEmail());
+        datos.put("limiteCredito", c.getLimiteCredito());
+        datos.put("deudaActual", c.getDeudaActual());
+
+        List<Map<String, Object>> movimientos = movimientoClienteRepository.todosDelCliente(id, p.empresaId()).stream().map(m -> {
+            Map<String, Object> f = new LinkedHashMap<>();
+            f.put("fecha", m.getFechaHora().toString());
+            f.put("tipo", m.getTipo());
+            f.put("monto", m.getMonto());
+            f.put("saldoResultante", m.getSaldoResultante());
+            f.put("ventaId", m.getVentaId());
+            f.put("metodoPago", m.getMetodoPago());
+            f.put("motivo", m.getMotivo());
+            return f;
+        }).toList();
+
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("generadoEn", java.time.LocalDateTime.now().toString());
+        r.put("cliente", datos);
+        r.put("movimientosCuenta", movimientos);
+        r.put("nota", "Los documentos tributarios emitidos a esta persona (boletas y facturas) se conservan por obligación legal "
+                + "y están en el proveedor de facturación electrónica del comercio.");
+        auditoria.registrar(p, "CLIENTE_EXPORTADO", "Datos exportados del cliente N° " + c.getId());
+        return r;
+    }
+
+    /**
+     * Derecho de supresión (Ley 21.719): borra los datos personales del cliente final (nombre, RUT, teléfono y correo)
+     * pero conserva las ventas y los movimientos, que el comercio necesita por razones contables y tributarias.
+     * No se permite si el cliente aún debe plata: primero hay que cobrarla o ajustarla. Solo ADMIN.
+     */
+    @PostMapping("/{id}/anonimizar")
+    @Transactional
+    public ResponseEntity<?> anonimizarCliente(@PathVariable Long id) {
+        AuthPrincipal p = SecurityUtils.actual();
+        Cliente c = clienteRepository.findByIdAndEmpresaId(id, p.empresaId())
+                .orElseThrow(() -> new RecursoNoEncontradoException("Cliente no encontrado."));
+        double deuda = c.getDeudaActual() != null ? c.getDeudaActual() : 0.0;
+        if (Math.abs(deuda) >= 1) {
+            throw new ConflictoException("Este cliente tiene deuda pendiente. Cóbrala o ajústala antes de eliminar sus datos personales.");
+        }
+        c.setNombre("Cliente eliminado N° " + c.getId());
+        c.setRut(null);
+        c.setTelefono(null);
+        c.setEmail(null);
+        c.setLimiteCredito(0.0);
+        clienteRepository.save(c);
+        auditoria.registrar(p, "CLIENTE_ANONIMIZADO", "Datos personales eliminados del cliente N° " + c.getId());
+        return ResponseEntity.ok(Map.of("status", "success", "message", "Los datos personales del cliente fueron eliminados."));
     }
 
     /** Solo ADMIN (ver SecurityConfig): límite de crédito, teléfono y correo del cliente. */
