@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,16 +101,12 @@ public class UsuarioController {
         Empresa empresa = admin.getEmpresa();
 
         String nombre = req.usuario() == null ? "" : req.usuario().trim();
-        if (!NOMBRE_USUARIO.matcher(nombre).matches()) {
-            throw new NegocioException("El usuario debe tener entre 3 y 50 caracteres: letras, números, punto, guion o guion bajo (sin espacios).");
-        }
+        nombre = Validaciones.usuario(nombre);
         if (usuarioRepository.existsByUsuario(nombre)) {
             throw new ConflictoException("El nombre de usuario \"" + nombre + "\" ya está en uso.");
         }
         String clave = req.contrasena();
-        if (clave == null || clave.length() < 8 || clave.length() > 100) {
-            throw new NegocioException("La contraseña debe tener entre 8 y 100 caracteres.");
-        }
+        Validaciones.contrasena(clave);
         Sucursal sucursal = sucursalDeMiEmpresa(req.sucursalId(), empresa.getId());
 
         String correoIngresado = req.correo() == null ? "" : req.correo().trim();
@@ -208,9 +205,7 @@ public class UsuarioController {
     public Map<String, String> restablecerContrasena(@PathVariable Long id, @RequestBody NuevaClaveReq req) {
         Usuario u = usuarioDeMiEmpresa(id);
         String nueva = req.contrasena();
-        if (nueva == null || nueva.length() < 8 || nueva.length() > 100) {
-            throw new NegocioException("La contraseña debe tener entre 8 y 100 caracteres.");
-        }
+        Validaciones.contrasena(nueva);
         u.setContrasena(passwordEncoder.encode(nueva));
         u.revocarSesiones(); // cierra las sesiones abiertas con la contraseña anterior
         usuarioRepository.save(u);

@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.service;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -84,12 +85,7 @@ public class RecuperacionClaveService {
 
     @Transactional
     public void restablecer(String token, String nueva) {
-        if (nueva == null || nueva.length() < 8) {
-            throw new NegocioException("La contraseña debe tener al menos 8 caracteres.");
-        }
-        if (nueva.length() > 100) {
-            throw new NegocioException("La contraseña es demasiado larga.");
-        }
+        Validaciones.contrasena(nueva);
         TokenRecuperacion t = token == null ? null : tokens.findByTokenHashAndUsadoFalse(HashUtil.sha256(token.trim())).orElse(null);
         if (t == null || t.getExpira().isBefore(LocalDateTime.now())) {
             throw new NegocioException("El enlace no es válido o ya venció. Solicita uno nuevo.");

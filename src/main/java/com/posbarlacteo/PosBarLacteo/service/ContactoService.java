@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.service;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -18,9 +19,9 @@ public class ContactoService {
     }
 
     public void enviar(String nombre, String correo, String telefono, String asunto, String mensaje) {
-        String n = limpiar(nombre, 100);
+        String n = Validaciones.nombrePropio("Tu nombre", nombre, 2, 100, true);
         String c = MailService.validarDestino(correo);
-        String t = limpiar(telefono, 30);
+        String t = nz(Validaciones.telefono("Tu teléfono", telefono, false));
         String a = limpiar(asunto, 120);
         String m = mensaje == null ? "" : mensaje.trim();
         if (n.length() < 2) throw new NegocioException("Ingresa tu nombre.");
@@ -41,6 +42,10 @@ public class ContactoService {
         } catch (RuntimeException ignorada) {
             // sin acción
         }
+    }
+
+    private static String nz(String v) {
+        return v == null ? "" : v;
     }
 
     private static String limpiar(String s, int max) {

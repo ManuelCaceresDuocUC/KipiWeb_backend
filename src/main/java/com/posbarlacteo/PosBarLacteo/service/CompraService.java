@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.service;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -125,20 +126,17 @@ public class CompraService {
     }
 
     private void aplicarProveedor(Proveedor pr, DatosProveedor d, Long excluirId) {
-        String nombre = limpiar(d == null ? null : d.nombre(), 150);
-        if (nombre == null) throw new NegocioException("Escribe el nombre del proveedor.");
+        if (d == null) throw new NegocioException("Escribe el nombre del proveedor.");
+        String nombre = Validaciones.nombrePropio("El nombre del proveedor", d.nombre(), 2, 150, true);
         if (proveedores.existeNombre(pr.getEmpresaId(), nombre, excluirId)) {
             throw new NegocioException("Ya tienes un proveedor con ese nombre.");
         }
-        String email = limpiar(d.email(), 120);
-        if (email != null && !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$")) {
-            throw new NegocioException("El correo del proveedor no es válido.");
-        }
+        String email = Validaciones.correo("El correo del proveedor", d.email(), false);
         pr.setNombre(nombre);
-        pr.setRut(limpiar(d.rut(), 12));
-        pr.setTelefono(limpiar(d.telefono(), 40));
+        pr.setRut(Validaciones.rut("El RUT del proveedor", d.rut(), false));
+        pr.setTelefono(Validaciones.telefono("El teléfono del proveedor", d.telefono(), false));
         pr.setEmail(email);
-        pr.setNotas(limpiar(d.notas(), 300));
+        pr.setNotas(Validaciones.texto("Las notas", d.notas(), 1, 300, false));
     }
 
     private Map<String, Object> mapaProveedor(Proveedor pr) {

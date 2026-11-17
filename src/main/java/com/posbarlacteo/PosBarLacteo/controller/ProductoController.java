@@ -1,5 +1,6 @@
 package com.posbarlacteo.PosBarLacteo.controller;
 
+import com.posbarlacteo.PosBarLacteo.util.Validaciones;
 import java.util.List;
 
 import org.springframework.data.domain.Page;
@@ -117,7 +118,7 @@ public class ProductoController {
         validarDatos(body);
 
         producto.setCodigoBarras(codigo);
-        producto.setDescripcion(body.getDescripcion().trim());
+        producto.setDescripcion(body.getDescripcion());
         producto.setPrecio(body.getPrecio());
         // El stock NO se edita aquí (evita pisar ventas simultáneas): se usa /api/inventario/movimientos.
         producto.setCosto(body.getCosto());
@@ -140,15 +141,13 @@ public class ProductoController {
         Producto producto = buscar(id);
 
         if (body.getDescripcion() != null) {
-            if (body.getDescripcion().isBlank()) throw new NegocioException("La descripción no puede estar vacía.");
-            producto.setDescripcion(body.getDescripcion().trim());
+            producto.setDescripcion(Validaciones.texto("La descripción", body.getDescripcion(), 2, 150, true));
         }
         if (body.getPrecio() != null) {
-            if (body.getPrecio() < 0 || body.getPrecio().isNaN()) throw new NegocioException("El precio no es válido.");
-            producto.setPrecio(body.getPrecio());
+            producto.setPrecio(Validaciones.dinero("El precio", body.getPrecio(), true));
         }
-        if (body.getCosto() != null) producto.setCosto(body.getCosto());
-        if (body.getStockCritico() != null) producto.setStockCritico(body.getStockCritico());
+        if (body.getCosto() != null) producto.setCosto(Validaciones.dinero("El costo", body.getCosto(), false));
+        if (body.getStockCritico() != null) producto.setStockCritico(Validaciones.cantidad("El stock mínimo", body.getStockCritico(), true));
         if (body.getUnidadMedida() != null) producto.setUnidadMedida(body.getUnidadMedida());
         if (body.getPesable() != null) producto.setPesable(body.getPesable());
         if (body.getEsInsumo() != null) producto.setEsInsumo(body.getEsInsumo());
@@ -182,12 +181,8 @@ public class ProductoController {
         body.setEmpresa(empresa);
         body.setActivo(true);
         body.setCodigoBarras(codigo);
-        body.setDescripcion(body.getDescripcion().trim());
         body.setCategoria(resolverCategoria(body.getCategoria(), p.empresaId()));
-        double stockInicial = body.getStock() != null ? body.getStock() : 0.0;
-        if (stockInicial < 0 || Double.isNaN(stockInicial)) {
-            throw new NegocioException("El stock inicial no puede ser negativo.");
-        }
+        double stockInicial = Validaciones.cantidad("El stock inicial", body.getStock(), Boolean.TRUE.equals(body.getPesable()));
         body.setStockLegacy(0.0);
         body.setStock(null);
         Producto guardado = productoRepository.save(body);
@@ -218,7 +213,6 @@ public class ProductoController {
         principal.setStockLegacy(0.0);
         principal.setStock(null);
         principal.setCodigoBarras(codigo);
-        principal.setDescripcion(principal.getDescripcion().trim());
         principal.setCategoria(resolverCategoria(principal.getCategoria(), p.empresaId()));
         if (principal.getUnidadMedida() == null || principal.getUnidadMedida().isBlank()) {
             principal.setUnidadMedida("UN");
@@ -268,7 +262,7 @@ public class ProductoController {
     }
 
     private String normalizarCodigo(String codigo) {
-        return (codigo == null || codigo.trim().isEmpty()) ? null : codigo.trim();
+        return Validaciones.codigoProducto(codigo);
     }
 
     private void validarCodigoUnico(String codigo, Long empresaId, Long idActual) {
@@ -281,12 +275,16 @@ public class ProductoController {
     }
 
     private void validarDatos(Producto p) {
-        if (p.getDescripcion() == null || p.getDescripcion().isBlank()) {
-            throw new NegocioException("La descripción es obligatoria.");
+        // Se deja el producto ya corregido: descripción sin espacios dobles y montos/cantidades acotados
+        p.setDescripcion(Validaciones.texto("La descripción", p.getDescripcion(), 2, 150, true));
+        p.setPrecio(Validaciones.dinero("El precio", p.getPrecio(), true));
+        if (p.getCosto() != null) p.setCosto(Validaciones.dinero("El costo", p.getCosto(), false));
+        if (p.getStockCritico() != null) p.setStockCritico(Validaciones.cantidad("El stock mínimo", p.getStockCritico(), true));
+        String um = p.getUnidadMedida() == null ? "UN" : p.getUnidadMedida().trim().toUpperCase();
+        if (!java.util.Set.of("UN", "KG", "GR", "LT").contains(um)) {
+            throw new NegocioException("La unidad de medida no es válida (UN, KG, GR o LT).");
         }
-        if (p.getPrecio() == null || p.getPrecio() < 0 || p.getPrecio().isNaN()) {
-            throw new NegocioException("El precio no es válido.");
-        }
+        p.setUnidadMedida(um);
     }
 
     /** La categoría debe existir y ser de la misma empresa; null = sin categoría. */
