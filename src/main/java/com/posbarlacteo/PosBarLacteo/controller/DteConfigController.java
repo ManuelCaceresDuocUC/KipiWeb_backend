@@ -123,7 +123,11 @@ public class DteConfigController {
         if (secretNuevo) {
             config.setApiSecret(payload.getApiSecret().trim());
         }
-        config.setRutEmisor(payload.getRutEmisor() == null ? null : payload.getRutEmisor().trim());
+        String rutEmisor = payload.getRutEmisor() == null ? "" : payload.getRutEmisor().trim();
+        if (!rutEmisor.isEmpty() && !com.posbarlacteo.PosBarLacteo.util.RutUtils.esValido(rutEmisor)) {
+            throw new NegocioException("El RUT del emisor no es válido. Revisa los números y el dígito verificador.");
+        }
+        config.setRutEmisor(rutEmisor.isEmpty() ? null : com.posbarlacteo.PosBarLacteo.util.RutUtils.normalizar(rutEmisor));
         config.setAmbiente(payload.getAmbiente());
         String acteco = payload.getActeco() == null ? "" : payload.getActeco().trim();
         if (!acteco.isEmpty() && DatosEmisor.parsearActeco(acteco).isEmpty()) {

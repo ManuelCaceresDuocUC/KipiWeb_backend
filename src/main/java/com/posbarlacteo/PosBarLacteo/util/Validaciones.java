@@ -159,6 +159,9 @@ public final class Validaciones {
         if (valor == null || valor.length() < 8 || valor.length() > 100) {
             throw new NegocioException("La contraseña debe tener entre 8 y 100 caracteres.");
         }
+        if (!valor.equals(valor.trim())) {
+            throw new NegocioException("La contraseña no puede empezar ni terminar con espacios.");
+        }
         if (!valor.matches(".*\\p{L}.*") || !valor.matches(".*\\d.*")) {
             throw new NegocioException("La contraseña debe incluir al menos una letra y un número.");
         }
@@ -192,6 +195,20 @@ public final class Validaciones {
             throw new NegocioException(campo + " es demasiado alto (máximo $99.999.999).");
         }
         return Math.round(valor);
+    }
+
+    /** Costo unitario: como el dinero pero con hasta 2 decimales (hay insumos que cuestan menos de un peso por gramo). */
+    public static Double costo(String campo, Double valor) {
+        if (valor == null) {
+            return null;
+        }
+        if (valor.isNaN() || valor.isInfinite() || valor < 0) {
+            throw new NegocioException(campo + " no es válido.");
+        }
+        if (valor > MAX_DINERO) {
+            throw new NegocioException(campo + " es demasiado alto (máximo $99.999.999).");
+        }
+        return Math.round(valor * 100d) / 100d;
     }
 
     /** Cantidad (stock, mínimo): finita, no negativa, hasta 9.999.999, con hasta 3 decimales. */

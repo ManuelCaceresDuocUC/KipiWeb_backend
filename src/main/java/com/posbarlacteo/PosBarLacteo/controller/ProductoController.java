@@ -146,7 +146,7 @@ public class ProductoController {
         if (body.getPrecio() != null) {
             producto.setPrecio(Validaciones.dinero("El precio", body.getPrecio(), true));
         }
-        if (body.getCosto() != null) producto.setCosto(Validaciones.dinero("El costo", body.getCosto(), false));
+        if (body.getCosto() != null) producto.setCosto(Validaciones.costo("El costo", body.getCosto()));
         if (body.getStockCritico() != null) producto.setStockCritico(Validaciones.cantidad("El stock mínimo", body.getStockCritico(), true));
         if (body.getUnidadMedida() != null) producto.setUnidadMedida(body.getUnidadMedida());
         if (body.getPesable() != null) producto.setPesable(body.getPesable());
@@ -182,7 +182,7 @@ public class ProductoController {
         body.setActivo(true);
         body.setCodigoBarras(codigo);
         body.setCategoria(resolverCategoria(body.getCategoria(), p.empresaId()));
-        double stockInicial = Validaciones.cantidad("El stock inicial", body.getStock(), Boolean.TRUE.equals(body.getPesable()));
+        double stockInicial = Validaciones.cantidad("El stock inicial", body.getStock(), Boolean.TRUE.equals(body.getPesable()) || !"UN".equals(body.getUnidadMedida()));
         body.setStockLegacy(0.0);
         body.setStock(null);
         Producto guardado = productoRepository.save(body);
@@ -278,7 +278,7 @@ public class ProductoController {
         // Se deja el producto ya corregido: descripción sin espacios dobles y montos/cantidades acotados
         p.setDescripcion(Validaciones.texto("La descripción", p.getDescripcion(), 2, 150, true));
         p.setPrecio(Validaciones.dinero("El precio", p.getPrecio(), true));
-        if (p.getCosto() != null) p.setCosto(Validaciones.dinero("El costo", p.getCosto(), false));
+        if (p.getCosto() != null) p.setCosto(Validaciones.costo("El costo", p.getCosto()));
         if (p.getStockCritico() != null) p.setStockCritico(Validaciones.cantidad("El stock mínimo", p.getStockCritico(), true));
         String um = p.getUnidadMedida() == null ? "UN" : p.getUnidadMedida().trim().toUpperCase();
         if (!java.util.Set.of("UN", "KG", "GR", "LT").contains(um)) {
