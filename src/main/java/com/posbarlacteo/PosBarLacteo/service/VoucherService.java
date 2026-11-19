@@ -43,12 +43,12 @@ public class VoucherService {
      */
     /** Ticket con solo la copia del local (cuando el cliente no se lleva comprobante impreso). */
     public String generarVoucherSoloLocalBase64(Venta venta, List<?> items) throws Exception {
-        return PdfTicketUtil.generarBase64(document -> agregarCopiaVoucher(document, venta, items, "COPIA LOCAL / CONTROL INTERNO"));
+        return PdfTicketUtil.generarBase64(document -> agregarCopiaVoucher(document, venta, items, "COPIA LOCAL / CONTROL INTERNO"), ancho(venta));
     }
 
     public String generarVoucherBase64(Venta venta, List<?> items, int copias) throws Exception {
         if (copias <= 1) {
-            return PdfTicketUtil.generarBase64(document -> agregarCopiaVoucher(document, venta, items, null));
+            return PdfTicketUtil.generarBase64(document -> agregarCopiaVoucher(document, venta, items, null), ancho(venta));
         }
         return PdfTicketUtil.generarBase64(document -> {
             // 1. COPIA CLIENTE
@@ -61,7 +61,17 @@ public class VoucherService {
 
             // 2. COPIA LOCAL / CONTROL INTERNO
             agregarCopiaVoucher(document, venta, items, "COPIA LOCAL / CONTROL INTERNO");
-        });
+        }, ancho(venta));
+    }
+
+    /** Ancho de página según el papel configurado por la empresa (58 u 80 mm). */
+    private static float ancho(Venta venta) {
+        return PdfTicketUtil.anchoPt(venta != null && venta.getEmpresa() != null ? venta.getEmpresa().getAnchoTicketMm() : null);
+    }
+
+    /** Línea separadora que cabe en el ancho del papel. */
+    private static String linea(Venta venta) {
+        return "-".repeat(PdfTicketUtil.es58(ancho(venta)) ? 34 : 44);
     }
 
     private void agregarCopiaVoucher(Document doc, Venta venta, List<?> items, String tipoCopia) throws Exception {
@@ -124,12 +134,12 @@ public class VoucherService {
         doc.add(new Paragraph("Venta N°: " + (ventaId != null ? ventaId : "S/N"), fontBold));
         doc.add(new Paragraph("Fecha: " + fechaVenta.format(formatFecha), fontBody));
         doc.add(new Paragraph(descripcionPagos(venta, metodo, formatMoneda), fontBody));
-        doc.add(new Paragraph("--------------------------------------------", fontBody));
+        doc.add(new Paragraph(linea(venta), fontBody));
 
         // --- TABLA DE PRODUCTOS ---
         PdfPTable table = new PdfPTable(3);
         table.setWidthPercentage(100);
-        table.setWidths(new float[]{1.5f, 4.5f, 3.0f});
+        table.setWidths(PdfTicketUtil.es58(ancho(venta)) ? new float[]{1.3f, 3.7f, 3.0f} : new float[]{1.5f, 4.5f, 3.0f});
 
         // Cabecera Tabla
         table.addCell(crearCelda("Cant.", fontBold, Element.ALIGN_LEFT));
@@ -165,7 +175,7 @@ public class VoucherService {
         }
 
         doc.add(table);
-        doc.add(new Paragraph("--------------------------------------------", fontBody));
+        doc.add(new Paragraph(linea(venta), fontBody));
 
         // --- TOTAL ---
         double montoFinal = (totalVenta != null && totalVenta > 0) ? totalVenta : totalCalculado;

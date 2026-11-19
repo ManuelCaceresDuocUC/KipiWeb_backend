@@ -40,7 +40,7 @@ public class ValeCreditoPdfService {
                 escribirVale(doc, venta, local, true);
                 corte(doc);
                 escribirVale(doc, venta, local, false);
-            });
+            }, PdfTicketUtil.anchoPt(venta.getEmpresa() != null ? venta.getEmpresa().getAnchoTicketMm() : null));
         } catch (Exception e) {
             log.error("No se pudo generar el vale de crédito de la venta {}: {}", venta.getId(), e.getMessage(), e);
             return null;
@@ -49,12 +49,17 @@ public class ValeCreditoPdfService {
 
     public String generarAbonoBase64(String clienteNombre, String clienteRut, double montoAbonado,
                                      double saldoAnterior, double saldoRestante, String metodoPago, String local) {
+        return generarAbonoBase64(clienteNombre, clienteRut, montoAbonado, saldoAnterior, saldoRestante, metodoPago, local, null);
+    }
+
+    public String generarAbonoBase64(String clienteNombre, String clienteRut, double montoAbonado,
+                                     double saldoAnterior, double saldoRestante, String metodoPago, String local, Integer anchoMm) {
         try {
             return PdfTicketUtil.generarBase64(doc -> {
                 escribirAbono(doc, clienteNombre, clienteRut, montoAbonado, saldoAnterior, saldoRestante, metodoPago, local, true);
                 corte(doc);
                 escribirAbono(doc, clienteNombre, clienteRut, montoAbonado, saldoAnterior, saldoRestante, metodoPago, local, false);
-            });
+            }, PdfTicketUtil.anchoPt(anchoMm));
         } catch (Exception e) {
             log.error("No se pudo generar el comprobante de abono: {}", e.getMessage(), e);
             return null;
