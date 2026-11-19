@@ -106,7 +106,13 @@ public class EmpresaConfigController {
     @Transactional(readOnly = true)
     public Map<String, Object> leer() {
         Empresa e = empresa(SecurityUtils.actual());
-        return Map.of("permiteFiado", Boolean.TRUE.equals(e.getPermiteFiado()));
+        return respuestaConfig(e);
+    }
+
+    private static Map<String, Object> respuestaConfig(Empresa e) {
+        return Map.of(
+                "permiteFiado", Boolean.TRUE.equals(e.getPermiteFiado()),
+                "anchoTicketMm", e.getAnchoTicketMm() == null ? 80 : e.getAnchoTicketMm());
     }
 
     @PutMapping("/config-ventas")
@@ -114,12 +120,25 @@ public class EmpresaConfigController {
     public Map<String, Object> guardar(@RequestBody Map<String, Object> body) {
         Empresa e = empresa(SecurityUtils.actual());
         Object valor = body.get("permiteFiado");
-        if (!(valor instanceof Boolean permite)) {
-            throw new NegocioException("Indica si se permite o no el fiado.");
+        Object ancho = body.get("anchoTicketMm");
+        if (valor == null && ancho == null) {
+            throw new NegocioException("No hay nada que guardar.");
         }
-        e.setPermiteFiado(permite);
+        if (valor != null) {
+            if (!(valor instanceof Boolean permite)) {
+                throw new NegocioException("Indica si se permite o no el fiado.");
+            }
+            e.setPermiteFiado(permite);
+        }
+        if (ancho != null) {
+            int mm = ancho instanceof Number n ? n.intValue() : -1;
+            if (mm != 58 && mm != 80) {
+                throw new NegocioException("El ancho del papel debe ser 58 u 80 mm.");
+            }
+            e.setAnchoTicketMm(mm);
+        }
         empresaRepository.save(e);
-        return Map.of("permiteFiado", permite);
+        return respuestaConfig(e);
     }
 
     private Empresa empresa(AuthPrincipal p) {

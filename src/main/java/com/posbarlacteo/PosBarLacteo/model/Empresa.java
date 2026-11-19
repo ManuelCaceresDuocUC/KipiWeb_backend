@@ -192,6 +192,18 @@ public class Empresa {
     @Column(name = "permite_fiado")
     private Boolean permiteFiado;
 
+    // Ancho del papel de la impresora térmica: 58 u 80 mm. null = 80.
+    @Column(name = "ancho_ticket_mm")
+    private Integer anchoTicketMm;
+
+    public Integer getAnchoTicketMm() {
+        return anchoTicketMm;
+    }
+
+    public void setAnchoTicketMm(Integer anchoTicketMm) {
+        this.anchoTicketMm = anchoTicketMm;
+    }
+
     public Boolean getPermiteFiado() {
         return permiteFiado;
     }

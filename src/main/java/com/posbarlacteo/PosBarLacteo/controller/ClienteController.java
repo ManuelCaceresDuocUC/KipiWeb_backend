@@ -183,7 +183,8 @@ public class ClienteController {
 
             String local = cliente.getEmpresa() != null ? cliente.getEmpresa().getRazonSocial() : "Local";
             String comprobante = valeCreditoPdfService.generarAbonoBase64(
-                    cliente.getNombre(), cliente.getRut(), montoFinal, deudaAntes, saldo, metodoPago, local);
+                    cliente.getNombre(), cliente.getRut(), montoFinal, deudaAntes, saldo, metodoPago, local,
+                    cliente.getEmpresa() != null ? cliente.getEmpresa().getAnchoTicketMm() : null);
 
             Map<String, Object> r = new LinkedHashMap<>();
             r.put("cliente", cliente);
