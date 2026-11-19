@@ -77,7 +77,7 @@ public class VentaDocumentosService {
         String empresa = v.getEmpresa() != null ? v.getEmpresa().getRazonSocial() : "KIPIPOS";
         byte[] pdf;
         try {
-            pdf = Base64.getDecoder().decode(voucherService.generarVoucherBase64(v, null));
+            pdf = Base64.getDecoder().decode(voucherService.generarVoucherBase64(v, null, 1)); // por correo solo va la copia del cliente
         } catch (Exception e) {
             throw new NegocioException("No se pudo generar el comprobante para enviar.");
         }
