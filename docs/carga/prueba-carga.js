@@ -4,7 +4,7 @@
 // pero usa una empresa de prueba (no la de un cliente real).
 //
 // Uso:
-//   k6 run -e BASE_URL=https://kipiweb-backend.onrender.com -e USUARIO=admin_prueba -e CLAVE='tu-clave' docs/carga/prueba-carga.js
+//   k6 run -e BASE_URL=https://kipiweb-backend-va.onrender.com -e USUARIO=admin_prueba -e CLAVE='tu-clave' docs/carga/prueba-carga.js
 //
 // Variables opcionales:
 //   PERFIL=suave | normal | fuerte   (por defecto: normal)
